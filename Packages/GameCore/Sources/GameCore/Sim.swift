@@ -298,8 +298,9 @@ public struct Sim: Equatable, Sendable {
         let feel = tuning.feel
         let move = max(-1, min(1, input.moveX))
         // Facing follows velocity.x every frame so the sprite never moonwalks.
-        // Stick wins only when nearly stopped.
-        if abs(bandit.velocity.x) > 0.5 {
+        // Tiny epsilon — knockback recovery used to leave facing stuck left while
+        // drifting right with |vx| under the old 0.5 threshold.
+        if abs(bandit.velocity.x) > 0.01 {
             bandit.facing = bandit.velocity.x >= 0 ? 1 : -1
         } else if abs(move) > feel.stickDeadZone {
             bandit.facing = move >= 0 ? 1 : -1

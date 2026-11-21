@@ -1437,13 +1437,17 @@ public final class BanditVisual: SKNode {
     /// Apply facing from travel velocity every frame (moonwalk fix).
     /// Source art faces west; body.xScale = −sign(vx) so the muzzle leads travel.
     public func setFacingFromVelocity(_ velocityX: Double, fallbackFacing: Double) {
-        if abs(velocityX) > 0.5 {
+        if abs(velocityX) > 0.01 {
             facingSign = velocityX >= 0 ? 1 : -1
         } else {
             facingSign = fallbackFacing >= 0 ? 1 : -1
         }
         applyFacingScale()
         sprite.xScale = abs(sprite.xScale)
+        // Kill any leftover squash action that could leave the wrong sign mid-drop.
+        if body.action(forKey: "sq") == nil {
+            body.xScale = bodyFaceScale()
+        }
     }
 
     /// Testable: west sheets flip when velocity/facing points east (+1).

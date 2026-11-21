@@ -2056,10 +2056,10 @@ public final class HeistScene: SKScene {
         pa.fontColor = ArtCatalog.neonPink
         pa.preferredMaxLayoutWidth = 240
         pa.numberOfLines = 2
-        // Flavor above the primary CTA — center-aligned so 2 lines never cover GO FOR 3★.
+        // Flavor well above the primary CTA — 2 lines must never cover GO FOR 3★.
         pa.verticalAlignmentMode = .center
         pa.horizontalAlignmentMode = .center
-        pa.position = CGPoint(x: 0, y: -62)
+        pa.position = CGPoint(x: 0, y: -56)
         pa.isHidden = true
         card.addChild(pa)
 
@@ -2070,14 +2070,14 @@ public final class HeistScene: SKScene {
         card.addChild(stats)
 
         let primary = makeOutcomeButton(title: "RETRY", color: ArtCatalog.neonLime, name: "retryBtn", wide: true)
-        primary.position = CGPoint(x: 0, y: -118)
+        primary.position = CGPoint(x: 0, y: -132)
         card.addChild(primary)
         let next = makeOutcomeButton(title: "NEXT", color: ArtCatalog.neonLime, name: "nextBtn", wide: true)
-        next.position = CGPoint(x: 0, y: -118)
+        next.position = CGPoint(x: 0, y: -132)
         next.isHidden = true
         card.addChild(next)
         let home = makeOutcomeButton(title: "HOME", color: ArtCatalog.neonPink, name: "homeBtn", wide: false)
-        home.position = CGPoint(x: 0, y: -174)
+        home.position = CGPoint(x: 0, y: -188)
         card.addChild(home)
     }
 
