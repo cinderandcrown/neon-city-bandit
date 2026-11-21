@@ -1264,7 +1264,10 @@ public final class BanditVisual: SKNode {
         if let victoryC {
             cycles["victory"] = victoryC
         }
-        usesWestSheets = sheetDriven
+        // CI + playtest evidence: with west-flip the raccoon still faces left while
+        // running right (backpack/cyan tubes on the right). Treat shipping sheets as
+        // east-facing so body.xScale = +sign(vx) puts the muzzle forward.
+        usesWestSheets = false
 
         if !sheetDriven {
             let licensedRun = ArtCatalog.licensedCycleTextures("run", maxFrames: 12)

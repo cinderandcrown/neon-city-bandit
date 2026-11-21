@@ -1970,7 +1970,7 @@ public final class HeistScene: SKScene {
         wash.name = "outcomeWash"
         outcomeRoot.addChild(wash)
 
-        let card = SKShapeNode(rectOf: CGSize(width: 300, height: 368), cornerRadius: 14)
+        let card = SKShapeNode(rectOf: CGSize(width: 300, height: 400), cornerRadius: 14)
         card.fillColor = SKColor(red: 0.07, green: 0.05, blue: 0.16, alpha: 0.96)
         card.strokeColor = ArtCatalog.neonCyan
         card.lineWidth = 2.5
@@ -2046,7 +2046,7 @@ public final class HeistScene: SKScene {
         hint.numberOfLines = 2
         hint.verticalAlignmentMode = .center
         hint.horizontalAlignmentMode = .center
-        hint.position = CGPoint(x: 0, y: -40)
+        hint.position = CGPoint(x: 0, y: -36)
         hint.text = ""
         card.addChild(hint)
 
@@ -2056,10 +2056,10 @@ public final class HeistScene: SKScene {
         pa.fontColor = ArtCatalog.neonPink
         pa.preferredMaxLayoutWidth = 240
         pa.numberOfLines = 2
-        // Flavor well above the primary CTA — 2 lines must never cover GO FOR 3★.
+        // Separate band between hint and CTA — never overlap GO FOR 3★.
         pa.verticalAlignmentMode = .center
         pa.horizontalAlignmentMode = .center
-        pa.position = CGPoint(x: 0, y: -56)
+        pa.position = CGPoint(x: 0, y: -72)
         pa.isHidden = true
         card.addChild(pa)
 
@@ -2070,14 +2070,14 @@ public final class HeistScene: SKScene {
         card.addChild(stats)
 
         let primary = makeOutcomeButton(title: "RETRY", color: ArtCatalog.neonLime, name: "retryBtn", wide: true)
-        primary.position = CGPoint(x: 0, y: -132)
+        primary.position = CGPoint(x: 0, y: -140)
         card.addChild(primary)
         let next = makeOutcomeButton(title: "NEXT", color: ArtCatalog.neonLime, name: "nextBtn", wide: true)
-        next.position = CGPoint(x: 0, y: -132)
+        next.position = CGPoint(x: 0, y: -140)
         next.isHidden = true
         card.addChild(next)
         let home = makeOutcomeButton(title: "HOME", color: ArtCatalog.neonPink, name: "homeBtn", wide: false)
-        home.position = CGPoint(x: 0, y: -188)
+        home.position = CGPoint(x: 0, y: -192)
         card.addChild(home)
     }
 
