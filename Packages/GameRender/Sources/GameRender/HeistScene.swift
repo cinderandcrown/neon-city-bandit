@@ -3391,12 +3391,13 @@ public final class HeistScene: SKScene {
 
             if case .playing = sim.state.phase {
                 sim.step(input)
-                // Smoke pre-death: hard stop short of the vault so the green VAULT zone
-                // is never crossed on a loop. Real vault is finishPush after diedOnce.
+                // Smoke pre-death: hard stop one tile short of EXIT so the green VAULT
+                // never cracks early — but leave the street MOP pack reachable so
+                // stomp → stomp-chain shots stay distinct (exitX-3 parked on the lip).
                 if smokeEnabled, !smoke.diedOnce, case .playing = sim.state.phase {
                     let tile = tuning.tileSize
                     if let exitX = sim.map.findFirst(.exit)?.0 {
-                        let maxX = Double(exitX - 3) * tile
+                        let maxX = Double(exitX - 1) * tile
                         if sim.state.bandit.position.x > maxX {
                             sim.state.bandit.position.x = maxX
                             if sim.state.bandit.velocity.x > 0 {
