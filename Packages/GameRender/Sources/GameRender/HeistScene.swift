@@ -492,7 +492,8 @@ public final class HeistScene: SKScene {
         let midY = viewH * 0.18
         let district = pendingDistrict
         if let far = ArtLibrary.districtLayer(district, layer: .far, height: h, maxPixel: maxPx) {
-            tileLayer(far, into: parallaxFar, y: midY + 60, z: -30, neonBoost: false, mirrorTile: true)
+            // No mirror tiling — repeating plates read as the level looping past the vault.
+            tileLayer(far, into: parallaxFar, y: midY + 60, z: -30, neonBoost: false, mirrorTile: false)
         }
         let gridW = min(max(mapW * 0.5, size.width / Self.worldZoom * 3), 1800)
         let grid = ArtCatalog.makePerspectiveGridHorizon(width: gridW, height: h * 0.55)
@@ -2055,10 +2056,10 @@ public final class HeistScene: SKScene {
         pa.fontColor = ArtCatalog.neonPink
         pa.preferredMaxLayoutWidth = 240
         pa.numberOfLines = 2
-        pa.verticalAlignmentMode = .top
+        // Flavor above the primary CTA — center-aligned so 2 lines never cover GO FOR 3★.
+        pa.verticalAlignmentMode = .center
         pa.horizontalAlignmentMode = .center
-        // Flavor line above NEXT/RETRY — keep clear of the replay hint.
-        pa.position = CGPoint(x: 0, y: -58)
+        pa.position = CGPoint(x: 0, y: -62)
         pa.isHidden = true
         card.addChild(pa)
 
@@ -2069,14 +2070,14 @@ public final class HeistScene: SKScene {
         card.addChild(stats)
 
         let primary = makeOutcomeButton(title: "RETRY", color: ArtCatalog.neonLime, name: "retryBtn", wide: true)
-        primary.position = CGPoint(x: 0, y: -98)
+        primary.position = CGPoint(x: 0, y: -118)
         card.addChild(primary)
         let next = makeOutcomeButton(title: "NEXT", color: ArtCatalog.neonLime, name: "nextBtn", wide: true)
-        next.position = CGPoint(x: 0, y: -98)
+        next.position = CGPoint(x: 0, y: -118)
         next.isHidden = true
         card.addChild(next)
         let home = makeOutcomeButton(title: "HOME", color: ArtCatalog.neonPink, name: "homeBtn", wide: false)
-        home.position = CGPoint(x: 0, y: -154)
+        home.position = CGPoint(x: 0, y: -174)
         card.addChild(home)
     }
 
@@ -2600,29 +2601,6 @@ public final class HeistScene: SKScene {
         }
         refreshObjectiveChip(forceBanner: true)
         updateHUDVisibility()
-    }
-
-    /// Premature vault crack during smoke: leave .won without rebuilding the sim.
-    /// Nudge only a couple tiles left — a 20-tile teleport looked like "stuck at vault forever".
-    private func softBounceOffVaultSmoke() {
-        failOutcomeHold = 0
-        hideOutcome()
-        clearPlayToasts()
-        let tile = tuning.tileSize
-        let exitX = sim.map.findFirst(.exit)?.0 ?? (sim.map.width - 2)
-        let parkX = Double(max(8, exitX - 3)) * tile
-        let streetY = sim.map.findFirst(.start).map { Double($0.1) * tile } ?? sim.state.bandit.position.y
-        if sim.state.bandit.position.x > parkX {
-            sim.state.bandit.position.x = parkX
-        }
-        sim.state.bandit.position.y = streetY
-        sim.state.bandit.velocity = Vec2(-tuning.feel.runSpeed * tile * 0.35, 0)
-        sim.state.bandit.facing = -1
-        sim.state.bandit.invuln = max(sim.state.bandit.invuln, 0.35)
-        sim.state.phase = .playing
-        skipFreezeSample = true
-        transitionBudgetMs = max(transitionBudgetMs, 1500)
-        snapCameraToHero()
     }
 
     private func clearPlayToasts() {
@@ -3378,9 +3356,13 @@ public final class HeistScene: SKScene {
                 let cue = smoke.next(sim: sim)
                 if cue.start { beginPlay() }
                 if cue.retry {
-                    if !smoke.diedOnce {
-                        // Soft bounce off the vault — keep the same run (no fake 8s restart win).
-                        softBounceOffVaultSmoke()
+                    if case .won = sim.state.phase, !smoke.diedOnce {
+                        // Premature vault (should be rare with pre-vault clamp) — clear .won,
+                        // never soft-bounce past the green VAULT for hundreds of seconds.
+                        sim.state.phase = .playing
+                        sim.state.vaultReached = false
+                        hideOutcome()
+                        clearPlayToasts()
                     } else {
                         skipFreezeSample = true
                         transitionBudgetMs = max(transitionBudgetMs, 2500)
@@ -3409,6 +3391,20 @@ public final class HeistScene: SKScene {
 
             if case .playing = sim.state.phase {
                 sim.step(input)
+                // Smoke pre-death: hard stop short of the vault so the green VAULT zone
+                // is never crossed on a loop. Real vault is finishPush after diedOnce.
+                if smokeEnabled, !smoke.diedOnce, case .playing = sim.state.phase {
+                    let tile = tuning.tileSize
+                    if let exitX = sim.map.findFirst(.exit)?.0 {
+                        let maxX = Double(exitX - 3) * tile
+                        if sim.state.bandit.position.x > maxX {
+                            sim.state.bandit.position.x = maxX
+                            if sim.state.bandit.velocity.x > 0 {
+                                sim.state.bandit.velocity.x = 0
+                            }
+                        }
+                    }
+                }
                 // After Mask, keep the bandit alive through pause/bg so death wait isn't raced by phase=won.
                 if smokeEnabled,
                    smoke.sawMask,
@@ -3714,9 +3710,16 @@ public final class HeistScene: SKScene {
                 damageFlash()
                 shake(0.35)
             case .win:
+                // Only a real EXIT-tile vaultReached may show VAULT CRACKED.
+                guard sim.state.vaultReached else {
+                    writeSmokeStatus()
+                    break
+                }
                 // Smoke: premature vault before the death beat must not sticky-set won=
                 // or flash VAULT CRACKED mid-run. Real clear happens after diedOnce.
                 if smokeEnabled, !smoke.diedOnce {
+                    sim.state.phase = .playing
+                    sim.state.vaultReached = false
                     writeSmokeStatus()
                     break
                 }
@@ -3782,6 +3785,10 @@ public final class HeistScene: SKScene {
         clearPlayToasts()
         objectiveBanner?.removeFromParent()
         objectiveBanner = nil
+        // Fake-win gate: never paint VAULT CRACKED unless feet hit the EXIT tile.
+        if case .won = sim.state.phase, !sim.state.vaultReached {
+            return
+        }
         outcomeRoot.isHidden = false
         layoutUI()
         guard let card = outcomeRoot.childNode(withName: "outcomeCard"),
@@ -3803,6 +3810,7 @@ public final class HeistScene: SKScene {
         var finalShiniesForCount = shinies
         switch sim.state.phase {
         case .won(_, let shinyTotal, let c):
+            guard sim.state.vaultReached else { return }
             isWin = true
             seconds = sim.state.elapsed
             combo = c
@@ -4106,13 +4114,8 @@ public final class HeistScene: SKScene {
         let b = sim.state.bandit
         // Physics uses body center; foot-anchored sprites need the feet on the deck.
         bandit.position = CGPoint(x: CGFloat(b.position.x), y: CGFloat(b.position.y) - bodyCenterToFeet)
-        // Sprite facing follows travel velocity first (sheets face west — flip for east).
-        // Prefer vx over stick so auto-run never moonwalks when moveX and vx briefly disagree.
-        let faceDir: Double = {
-            if abs(b.velocity.x) > 2 { return b.velocity.x >= 0 ? 1 : -1 }
-            return b.facing
-        }()
-        bandit.setFacing(faceDir)
+        // Every frame: body.xScale from sign(velocity.x). Source sheets face west.
+        bandit.setFacingFromVelocity(b.velocity.x, fallbackFacing: b.facing)
         let moveSpeed = CGFloat(hypot(b.velocity.x, 0) / max(tuning.tileSize, 1))
         let runSpeed = CGFloat(tuning.runSpeed)
         bandit.show(
@@ -4411,74 +4414,56 @@ public final class HeistScene: SKScene {
         }
     }
 
-    /// Persistent objective chip — ticks with a pop as stomps / tutorial advance.
+    /// Objective tips are queued toasts only — never a sticky chip that stacks with TAP MASK.
     private func showObjectiveBanner() {
         refreshObjectiveChip(forceBanner: true)
     }
 
     private func refreshObjectiveChip(forceBanner: Bool = false) {
+        objectiveBanner?.removeFromParent()
+        objectiveBanner = nil
         let stompsNeeded = 3
-        // Progress is only real air-stomps (tutorialStomps) — never invent 3/3.
         let done = max(0, min(tutorialStomps, stompsNeeded))
-        // Chip stays a short progress label — tips fire once as toasts (no forever stack).
-        let text: String
-        // Chip is short progress only — tips fire once as auto-dismiss toasts (~2s).
+        var tips: [(key: String, text: String, color: SKColor)] = []
         switch tutorialStep {
         case 0, 1:
-            text = "Stomp MOPs \(done)/\(stompsNeeded)"
+            tips.append(("stomp-\(done)", "Stomp MOPs \(done)/\(stompsNeeded)", ArtCatalog.neonLime))
         case 2:
             if sim.state.bandit.maskCharges > 0 || sim.state.bandit.maskMode {
-                text = "To the vault"
-                if lastObjectiveTip != "mask" {
-                    lastObjectiveTip = "mask"
-                    showPlayToast("TAP MASK — smash mode!", color: ArtCatalog.neonCyan, hold: 2.0)
-                }
+                tips.append(("mask", "TAP MASK — smash mode!", ArtCatalog.neonCyan))
+                tips.append(("vault", "To the vault", ArtCatalog.neonLime))
             } else {
-                text = "Stomp MOPs \(done)/\(stompsNeeded)"
+                tips.append(("stomp-\(done)", "Stomp MOPs \(done)/\(stompsNeeded)", ArtCatalog.neonLime))
             }
         default:
-            text = "To the vault"
-            if lastObjectiveTip != "vault" {
-                lastObjectiveTip = "vault"
-                showPlayToast("Crack the VAULT", color: ArtCatalog.neonLime, hold: 2.0)
-            }
+            tips.append(("vault", "To the vault", ArtCatalog.neonLime))
         }
-        if objectiveBanner == nil || forceBanner {
-            objectiveBanner?.removeFromParent()
-            let root = SKNode()
-            root.name = "objectiveBanner"
-            root.zPosition = 280
-            let bg = SKShapeNode(rectOf: CGSize(width: min(size.width * 0.55, CGFloat(220)), height: CGFloat(28)), cornerRadius: 8)
-            bg.name = "objBg"
-            bg.fillColor = SKColor(red: 0.04, green: 0.03, blue: 0.1, alpha: 0.85)
-            bg.strokeColor = ArtCatalog.neonCyan
-            bg.lineWidth = 1.2
-            root.addChild(bg)
-            let title = SKLabelNode(fontNamed: "AvenirNext-Heavy")
-            title.name = "objText"
-            title.fontSize = 12
-            title.fontColor = ArtCatalog.neonLime
-            title.verticalAlignmentMode = .center
-            root.addChild(title)
-            let topSafe = max(safeInsets().top, 59) + 78
-            root.position = CGPoint(x: 0, y: size.height * 0.5 - topSafe)
-            overlay.addChild(root)
-            objectiveBanner = root
-            layoutUI()
-        }
-        if let title = objectiveBanner?.childNode(withName: "objText") as? SKLabelNode {
-            if title.text != text {
-                title.text = text
-                objectiveBanner?.run(SKAction.sequence([
-                    SKAction.scale(to: 1.12, duration: 0.08),
-                    SKAction.scale(to: 1.0, duration: 0.1),
-                ]))
-            }
+        // Queue each objective tip once (~3s auto-dismiss). Never stack on screen.
+        // Callers clear lastObjectiveTip on new runs; forceBanner is legacy no-op for “show now”.
+        _ = forceBanner
+        for tip in tips {
+            let already = lastObjectiveTip == tip.key
+                || lastObjectiveTip.hasPrefix(tip.key + ",")
+                || lastObjectiveTip.contains("," + tip.key)
+            guard !already else { continue }
+            lastObjectiveTip = lastObjectiveTip.isEmpty ? tip.key : lastObjectiveTip + "," + tip.key
+            showPlayToast(tip.text, color: tip.color, hold: 3.0)
         }
     }
 
     private func showPlayToast(_ text: String, color: SKColor, hold: TimeInterval) {
-        let capped = min(max(hold, 1.2), 2.2)
+        // ~3s on screen; queue so TAP MASK never stacks over Stomp/To the vault.
+        let capped = min(max(hold, 2.5), 3.2)
+        // Drop a duplicate of the currently-queued or showing tip.
+        if activeToastNode != nil || toastShowing {
+            toastQueue.removeAll { $0.text == text }
+        }
+        if toastQueue.contains(where: { $0.text == text }) { return }
+        if let active = activeToastNode,
+           let label = active.children.compactMap({ $0 as? SKLabelNode }).first,
+           label.text == text {
+            return
+        }
         toastQueue.append((text, color, capped))
         pumpToastQueue()
     }
@@ -4490,9 +4475,9 @@ public final class HeistScene: SKScene {
         toastShowing = true
         activeToastNode?.removeAllActions()
         activeToastNode?.removeFromParent()
-        // Sit under the stats row / objective chip — never cover hearts or the timer.
+        // Single toast slot under the stats row — never stack with another tip.
         let insets = safeInsets()
-        let topSafe = max(insets.top, 59) + 108
+        let topSafe = max(insets.top, 59) + 86
         let root = SKNode()
         root.name = "playToast"
         root.zPosition = 275

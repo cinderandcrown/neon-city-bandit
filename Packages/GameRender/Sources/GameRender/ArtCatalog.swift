@@ -1194,7 +1194,7 @@ public final class BanditVisual: SKNode {
     private var flopTex: SKTexture?
     private var maskTex: SKTexture?
     private var bobPhase: CGFloat = 0
-    /// World facing: +1 = right/east. Sheets face west, so body.xScale = −facingSign.
+    /// World facing: +1 = right/east. Source run/idle sheets face WEST (muzzle left).
     private var facingSign: CGFloat = 1
     private var usesWestSheets = true
     private var footAnchorY: CGFloat = 0.14
@@ -1434,22 +1434,38 @@ public final class BanditVisual: SKNode {
         sprite.xScale = abs(sprite.xScale)
     }
 
+    /// Apply facing from travel velocity every frame (moonwalk fix).
+    /// Source art faces west; body.xScale = −sign(vx) so the muzzle leads travel.
+    public func setFacingFromVelocity(_ velocityX: Double, fallbackFacing: Double) {
+        if abs(velocityX) > 0.5 {
+            facingSign = velocityX >= 0 ? 1 : -1
+        } else {
+            facingSign = fallbackFacing >= 0 ? 1 : -1
+        }
+        applyFacingScale()
+        sprite.xScale = abs(sprite.xScale)
+    }
+
+    /// Testable: west sheets flip when velocity/facing points east (+1).
+    public static func bodyXScale(facingSign: CGFloat, sheetsFaceWest: Bool) -> CGFloat {
+        sheetsFaceWest ? -facingSign : facingSign
+    }
+
     private func bodyFaceScale() -> CGFloat {
-        // West-facing sheets: flip when facing right (+1).
-        usesWestSheets ? -facingSign : facingSign
+        Self.bodyXScale(facingSign: facingSign, sheetsFaceWest: usesWestSheets)
     }
 
     private func applyFacingScale() {
+        // Always assert from velocity/facing sign — never leave a stale squash sign.
         body.xScale = bodyFaceScale()
     }
 
-    /// Keep west-sheet flip correct without clobbering an in-flight squash scaleX.
+    /// Keep west-sheet flip correct without clobbering an in-flight squash magnitude.
     private func refreshFacingScalePreservingSquash() {
         let face = bodyFaceScale()
         if body.action(forKey: "sq") != nil {
-            if (body.xScale >= 0) != (face >= 0) {
-                body.xScale = -body.xScale
-            }
+            let mag = abs(body.xScale)
+            body.xScale = (face < 0 ? -1 : 1) * max(mag, 0.01)
         } else {
             body.xScale = face
         }

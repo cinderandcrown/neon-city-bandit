@@ -120,15 +120,13 @@ public struct SmokeBrain: Equatable, Sendable {
             return (input, start, retry)
 
         case .won:
-            // Before death: soft-bounce without a full sim.retry (that was the "fake win"
-            // hitch — sticky won= + 8s restart). Nudge is done by HeistScene not setting
-            // smokeStatus.won; here we only ask for a lightweight retry to leave .won.
+            // Before death: clear .won without a full sim.retry (HeistScene pre-vault clamp
+            // should prevent this; if it fires, leave .won without showing results).
             if !diedOnce {
                 retry = true
                 act = .play
                 maskShowcaseFrames = 0
                 seekDeathFrames = 0
-                // Prefer seekDeath / mop hunt over another vault crack.
                 if sawMask {
                     act = .seekDeath
                 }
@@ -201,7 +199,7 @@ public struct SmokeBrain: Equatable, Sendable {
         let captureMask = Self.smokeFlagExists("smoke_capture_mask.txt")
             || Self.smokeFlagExists("smoke_force_mask.txt")
 
-        // No exit soft-hold: premature vault cracks bounce until diedOnce (see .won).
+        // No exit soft-hold: HeistScene clamps pre-death runs short of the vault.
         // Soft-holding at EXIT skipped the MOP pack after rooftop (stomps=0 forever).
 
         // Beat 1 — run the teaching runway forward until midrun still lands.

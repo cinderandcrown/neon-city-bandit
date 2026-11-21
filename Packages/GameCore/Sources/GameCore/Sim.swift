@@ -25,6 +25,8 @@ public struct SimState: Equatable, Sendable {
     public var controlVariant: ControlVariant
     public var events: [SimEvent]
     public var bestCombo: Int
+    /// Sticky: set only when feet land on the EXIT tile. Results UI must gate on this.
+    public var vaultReached: Bool
 
     public var stateHash: UInt64 {
         var h: UInt64 = 0xcbf29ce484222325
@@ -35,6 +37,7 @@ public struct SimState: Equatable, Sendable {
         mixD(bandit.velocity.x); mixD(bandit.velocity.y)
         mix(UInt64(bandit.combo)); mix(UInt64(bandit.carriedShinies)); mix(UInt64(bandit.bankedShinies))
         mix(UInt64(bandit.hearts)); mix(bandit.maskMode ? 1 : 0)
+        mix(vaultReached ? 1 : 0)
         for s in shinies { mix(UInt64(s.id)); mix(s.alive ? 1 : 0) }
         for m in mops { mix(UInt64(m.id)); mix(m.alive ? 1 : 0); mixD(m.position.x) }
         switch phase {
@@ -156,7 +159,8 @@ public struct Sim: Equatable, Sendable {
             phase: .title,
             controlVariant: variant,
             events: [],
-            bestCombo: 0
+            bestCombo: 0,
+            vaultReached: false
         )
     }
 
@@ -293,9 +297,9 @@ public struct Sim: Equatable, Sendable {
     private mutating func integrate(input: InputFrame, bandit: inout BanditState, dt: Double) {
         let feel = tuning.feel
         let move = max(-1, min(1, input.moveX))
-        // Facing follows travel velocity first so auto-run never moonwalks when stick
-        // and vx briefly disagree. Stick wins only when nearly stopped.
-        if abs(bandit.velocity.x) > 2 {
+        // Facing follows velocity.x every frame so the sprite never moonwalks.
+        // Stick wins only when nearly stopped.
+        if abs(bandit.velocity.x) > 0.5 {
             bandit.facing = bandit.velocity.x >= 0 ? 1 : -1
         } else if abs(move) > feel.stickDeadZone {
             bandit.facing = move >= 0 ? 1 : -1
@@ -585,8 +589,13 @@ public struct Sim: Equatable, Sendable {
             if solidAt(bandit.position.x - halfW - 2, bandit.position.y) { bandit.onWallLeft = true }
         }
 
-        // Clamp to map
-        let minX = halfW, maxX = Double(map.width) * tile - halfW
+        // Clamp to map — never run past the vault door (no tile-repeat / overshoot).
+        let minX = halfW
+        var maxX = Double(map.width) * tile - halfW
+        if let e = map.findFirst(.exit) {
+            // Feet stay on/at the EXIT tile center so bankAndExit can fire; solid wall past E.
+            maxX = min(maxX, Double(e.0) * tile + tile * 0.55)
+        }
         let minY = halfH
         bandit.position.x = min(max(bandit.position.x, minX), maxX)
         if bandit.position.y < minY - tile * 2 {
@@ -784,23 +793,14 @@ public struct Sim: Equatable, Sendable {
             bandit.carriedShinies = 0
             state.events.append(SimEvent(kind: .bank, position: bandit.position))
         }
-        // Vault clear: on the EXIT tile OR close enough that a walk-into-door reads as a win.
-        if t == .exit || nearExit(bandit) {
-            let total = bandit.bankedShinies + bandit.carriedShinies
-            bandit.bankedShinies = total
-            bandit.carriedShinies = 0
-            state.phase = .won(seconds: state.elapsed, shinies: bandit.bankedShinies, combo: state.bestCombo)
-            state.events.append(SimEvent(kind: .win, position: bandit.position))
-        }
-    }
-
-    private func nearExit(_ bandit: BanditState) -> Bool {
-        guard let e = map.findFirst(.exit) else { return false }
-        let p = map.worldCenter(ofX: e.0, y: e.1, tileSize: tuning.tileSize)
-        // Horizontal reach + same deck — walking into the vault door must end the heist.
-        let dx = abs(bandit.position.x - p.x)
-        let dy = abs(bandit.position.y - p.y)
-        return dx < tuning.tileSize * 1.35 && dy < tuning.tileSize * 1.6
+        // Vault clear: feet on the EXIT tile only — never a proximity fake-win.
+        guard t == .exit, bandit.onGround else { return }
+        state.vaultReached = true
+        let total = bandit.bankedShinies + bandit.carriedShinies
+        bandit.bankedShinies = total
+        bandit.carriedShinies = 0
+        state.phase = .won(seconds: state.elapsed, shinies: bandit.bankedShinies, combo: state.bestCombo)
+        state.events.append(SimEvent(kind: .win, position: bandit.position))
     }
 
     private mutating func updateMops(bandit: inout BanditState, dt: Double, stompFalling: Bool, jumpHeld: Bool) {

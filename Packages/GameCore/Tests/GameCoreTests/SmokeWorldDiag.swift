@@ -175,57 +175,113 @@ final class SmokeWorldProgressTests: XCTestCase {
         brain.act = .finishPush
         brain.sawMask = true
         sim.startRun()
-        // Park past the vault to prove overshoot recovery, then finishPush must win.
+        // Park just shy of the vault; finishPush must run onto .exit and win.
         let tile = sim.tuning.tileSize
         let exitX = map.findFirst(.exit)!.0
         let startY = map.findFirst(.start)!.1
-        sim.state.bandit.position = map.worldStandOnDeckBelow(ofX: exitX + 2, markerY: startY, tileSize: tile)
+        sim.state.bandit.position = map.worldStandOnDeckBelow(ofX: exitX - 2, markerY: startY, tileSize: tile)
         sim.state.bandit.position.y += 14
         sim.state.bandit.onGround = true
         var won = false
-        var minTX = 999
         for _ in 0..<Int(25 * sim.tuning.simHz) {
             let cue = brain.next(sim: sim)
             XCTAssertEqual(brain.act, .finishPush)
             if case .playing = sim.state.phase {
                 sim.step(cue.input)
-                minTX = min(minTX, Int(floor(sim.state.bandit.position.x / tile)))
             }
-            if case .won = sim.state.phase { won = true; break }
+            if case .won = sim.state.phase {
+                XCTAssertTrue(sim.state.vaultReached)
+                won = true
+                break
+            }
         }
         XCTAssertTrue(
             won,
-            "finishPush must walk back onto .exit after overshoot (minTX=\(minTX) exit=\(exitX) phase=\(sim.state.phase))"
+            "finishPush must reach .exit (exit=\(exitX) phase=\(sim.state.phase))"
         )
     }
 
-    func testFacingFollowsMoveIntent() throws {
+    /// (1) Facing follows sign(velocity.x) every frame — moonwalk regression.
+    func testFacingFollowsVelocityXEveryFrame() throws {
         let map = try NeonDocksLevel.load()
         var sim = Sim(map: map, tuning: .default, seed: 1)
         sim.startRun()
-        for _ in 0..<30 {
+        let tile = sim.tuning.tileSize
+        let start = map.findFirst(.start)!
+        // Mid-runway so L/R aren't blocked by spawn lip or vault clamp.
+        var stand = map.worldStandOnDeckBelow(ofX: start.0 + 12, markerY: start.1, tileSize: tile)
+        stand.y += 14
+        sim.state.bandit.position = stand
+        sim.state.bandit.onGround = true
+        for _ in 0..<40 {
             sim.step(InputFrame(moveX: 1))
         }
-        XCTAssertGreaterThan(sim.state.bandit.velocity.x, 0)
-        XCTAssertEqual(sim.state.bandit.facing, 1, "running right must face +1")
-        for _ in 0..<30 {
+        XCTAssertGreaterThan(sim.state.bandit.velocity.x, 0.5)
+        XCTAssertEqual(sim.state.bandit.facing, 1, "vx>0 must face +1 (east)")
+        for _ in 0..<50 {
             sim.step(InputFrame(moveX: -1))
         }
-        XCTAssertEqual(sim.state.bandit.facing, -1, "moving left must face -1")
+        XCTAssertLessThan(sim.state.bandit.velocity.x, -0.5)
+        XCTAssertEqual(sim.state.bandit.facing, -1, "vx<0 must face −1 (west)")
+        for _ in 0..<50 {
+            sim.step(InputFrame(moveX: 1))
+        }
+        XCTAssertGreaterThan(sim.state.bandit.velocity.x, 0.5)
+        XCTAssertEqual(sim.state.bandit.facing, 1, "facing must re-track +vx every frame")
     }
 
-    func testNearExitWins() throws {
+    /// (2) Reaching the EXIT tile ends the run; the level does not continue past the vault.
+    func testVaultExitEndsRunAndSealsPastDoor() throws {
         let map = try NeonDocksLevel.load()
         var sim = Sim(map: map, tuning: .default, seed: 2)
         sim.startRun()
         let tile = sim.tuning.tileSize
         let exit = map.findFirst(.exit)!
-        // Park beside the vault door (not exactly on the tile center).
-        sim.state.bandit.position = Vec2(Double(exit.0) * tile + tile * 0.2, Double(exit.1) * tile)
+        // Solid ground immediately past E — no open corridor to tile-repeat through.
+        XCTAssertEqual(map.tile(atX: exit.0 + 1, y: exit.1), .ground)
+        var stand = map.worldStandOnDeckBelow(ofX: exit.0, markerY: exit.1, tileSize: tile)
+        stand.y += 14 // body center above feet
+        sim.state.bandit.position = stand
         sim.state.bandit.onGround = true
+        sim.state.bandit.velocity = Vec2(tile, 0)
         sim.step(InputFrame(moveX: 1))
         guard case .won = sim.state.phase else {
-            XCTFail("walking into vault must win, phase=\(sim.state.phase)")
+            XCTFail("standing on EXIT must end the run, phase=\(sim.state.phase) vault=\(sim.state.vaultReached)")
+            return
+        }
+        XCTAssertTrue(sim.state.vaultReached)
+        // Clamp: cannot walk past the vault lip.
+        let maxX = Double(exit.0) * tile + tile * 0.55
+        XCTAssertLessThanOrEqual(sim.state.bandit.position.x, maxX + 0.01)
+    }
+
+    /// (3) Results / win only from a real vault-reached event — proximity is not enough.
+    func testWinRequiresRealVaultReached() throws {
+        let map = try NeonDocksLevel.load()
+        var sim = Sim(map: map, tuning: .default, seed: 3)
+        sim.startRun()
+        let tile = sim.tuning.tileSize
+        let exit = map.findFirst(.exit)!
+        // Park beside the door (same deck) — old nearExit radius would have won.
+        var beside = map.worldStandOnDeckBelow(ofX: exit.0 - 1, markerY: exit.1, tileSize: tile)
+        beside.y += 14
+        sim.state.bandit.position = beside
+        sim.state.bandit.onGround = true
+        sim.state.bandit.velocity = .zero
+        sim.step(InputFrame(moveX: 0))
+        XCTAssertFalse(sim.state.vaultReached, "near vault must not set vaultReached")
+        if case .won = sim.state.phase {
+            XCTFail("proximity must not fake-win")
+        }
+        // Now feet on EXIT.
+        var stand = map.worldStandOnDeckBelow(ofX: exit.0, markerY: exit.1, tileSize: tile)
+        stand.y += 14
+        sim.state.bandit.position = stand
+        sim.state.bandit.onGround = true
+        sim.step(InputFrame(moveX: 1))
+        XCTAssertTrue(sim.state.vaultReached)
+        guard case .won = sim.state.phase else {
+            XCTFail("EXIT tile must win with vaultReached, phase=\(sim.state.phase)")
             return
         }
     }

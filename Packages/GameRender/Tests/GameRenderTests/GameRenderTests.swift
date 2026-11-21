@@ -44,6 +44,14 @@ final class GameRenderTests: XCTestCase {
         XCTAssertEqual(PublisherIdent.titleTracking, 3.2, accuracy: 0.01)
     }
 
+    /// West-facing source sheets: body.xScale = −sign(facing) so muzzle leads travel.
+    func testBanditBodyXScaleFollowsVelocitySign() {
+        XCTAssertEqual(BanditVisual.bodyXScale(facingSign: 1, sheetsFaceWest: true), -1)
+        XCTAssertEqual(BanditVisual.bodyXScale(facingSign: -1, sheetsFaceWest: true), 1)
+        XCTAssertEqual(BanditVisual.bodyXScale(facingSign: 1, sheetsFaceWest: false), 1)
+        XCTAssertEqual(BanditVisual.bodyXScale(facingSign: -1, sheetsFaceWest: false), -1)
+    }
+
     func testTitleButtonFramesNonOverlappingHelper() {
         let a = CGRect(x: 0, y: 0, width: 40, height: 20)
         let b = CGRect(x: 50, y: 0, width: 40, height: 20)
