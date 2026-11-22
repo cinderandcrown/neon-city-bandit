@@ -794,8 +794,18 @@ public struct Sim: Equatable, Sendable {
             bandit.carriedShinies = 0
             state.events.append(SimEvent(kind: .bank, position: bandit.position))
         }
-        // Vault clear: feet on the EXIT tile only — never a proximity fake-win.
-        guard t == .exit, bandit.onGround else { return }
+        // Vault clear: feet on/aligned with the EXIT column on the vault deck.
+        // Covers street approach and the lower deck under the door after a pit climb.
+        guard bandit.onGround else { return }
+        let onExit: Bool = {
+            if t == .exit { return true }
+            guard let e = map.findFirst(.exit) else { return false }
+            // Same column as the vault marker, standing on the vault deck (not a distant floor).
+            let sameCol = tx == e.0
+            let onDeck = abs(bandit.position.y - Double(e.1) * tile) < tile * 1.35
+            return sameCol && onDeck
+        }()
+        guard onExit else { return }
         state.vaultReached = true
         let total = bandit.bankedShinies + bandit.carriedShinies
         bandit.bankedShinies = total

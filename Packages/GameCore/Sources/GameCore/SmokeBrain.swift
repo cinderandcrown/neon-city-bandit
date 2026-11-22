@@ -120,18 +120,7 @@ public struct SmokeBrain: Equatable, Sendable {
             return (input, start, retry)
 
         case .won:
-            // Before death: clear .won without a full sim.retry (HeistScene pre-vault clamp
-            // should prevent this; if it fires, leave .won without showing results).
-            if !diedOnce {
-                retry = true
-                act = .play
-                maskShowcaseFrames = 0
-                seekDeathFrames = 0
-                if sawMask {
-                    act = .seekDeath
-                }
-                return (input, start, retry)
-            }
+            // Vault win is final — never soft-bounce or ask for retry.
             act = .done
             return (input, start, retry)
 
@@ -374,17 +363,18 @@ public struct SmokeBrain: Equatable, Sendable {
             moveX = 1.0
         }
 
-        // Stay off the vault until the death beat — premature won→retry hitch spikes maxFrameMs.
-        // Keep the window tight so late street MOPs (exit-4) stay stompable.
+        // Stay well clear of the vault until death — crossing EXIT ends the run for real.
+        // Retreat early so the green VAULT marker is never crossed before finishPush.
         if midrunOk, !diedOnce, act != .seekDeath, act != .finishPush {
             let exitX = sim.map.findFirst(.exit)?.0 ?? (sim.map.width - 2)
-            if tx >= exitX - 2 {
+            if tx >= exitX - 5 {
                 moveX = -1.0
                 jumpPressed = false
                 jumpHeld = false
                 pouncePressed = false
-            } else if tx >= exitX - 5 {
-                moveX = min(moveX, 0.35)
+                dashPressed = false
+            } else if tx >= exitX - 8 {
+                moveX = min(moveX, 0.25)
             }
         }
 

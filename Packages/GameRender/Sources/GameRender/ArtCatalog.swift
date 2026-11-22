@@ -1399,7 +1399,7 @@ public final class BanditVisual: SKNode {
             rig.addChild(n)
         }
         name = "bandit"
-        applyFacingScale()
+        applyTravelFacing(velocityX: 0, facing: Double(facingSign))
 
         for i in 0..<trailPoolSize {
             let speck = SKSpriteNode(texture: idleTex, size: SpriteCycles.banditDisplaySize)
@@ -1433,23 +1433,24 @@ public final class BanditVisual: SKNode {
 
     public func setFacing(_ facing: Double) {
         facingSign = facing >= 0 ? 1 : -1
-        applyFacingScale()
-        sprite.xScale = abs(sprite.xScale)
+        // Facing scale is owned by applyTravelFacing (called once per frame from sync).
     }
 
-    /// Apply facing from travel velocity every frame (moonwalk fix).
-    /// Source art faces west; body.xScale = −sign(vx) so the muzzle leads travel.
-    public func setFacingFromVelocity(_ velocityX: Double, fallbackFacing: Double) {
+    /// Sole facing writer — call once per frame after pose/squash so every movement
+    /// source (run, dash, knockback, retreat, Mask) ends at the same xScale.
+    public func applyTravelFacing(velocityX: Double, facing: Double) {
         if abs(velocityX) > 0.01 {
             facingSign = velocityX >= 0 ? 1 : -1
         } else {
-            facingSign = fallbackFacing >= 0 ? 1 : -1
+            facingSign = facing >= 0 ? 1 : -1
         }
-        applyFacingScale()
+        let face = bodyFaceScale()
         sprite.xScale = abs(sprite.xScale)
-        // Kill any leftover squash action that could leave the wrong sign mid-drop.
-        if body.action(forKey: "sq") == nil {
-            body.xScale = bodyFaceScale()
+        if body.action(forKey: "sq") != nil {
+            // Preserve squash magnitude; force travel sign so mid-stomp dashes can't moonwalk.
+            body.xScale = (face < 0 ? -1 : 1) * max(abs(body.xScale), 0.01)
+        } else {
+            body.xScale = face
         }
     }
 
@@ -1462,41 +1463,16 @@ public final class BanditVisual: SKNode {
         Self.bodyXScale(facingSign: facingSign, sheetsFaceWest: usesWestSheets)
     }
 
-    private func applyFacingScale() {
-        // Always assert from velocity/facing sign — never leave a stale squash sign.
-        body.xScale = bodyFaceScale()
-    }
-
-    /// Keep west-sheet flip correct without clobbering an in-flight squash magnitude.
-    private func refreshFacingScalePreservingSquash() {
-        let face = bodyFaceScale()
-        if body.action(forKey: "sq") != nil {
-            let mag = abs(body.xScale)
-            body.xScale = (face < 0 ? -1 : 1) * max(mag, 0.01)
-        } else {
-            body.xScale = face
-        }
-    }
-
     public func squash(x: CGFloat, y: CGFloat) {
         body.removeAction(forKey: "sq")
-        let face = bodyFaceScale()
-        body.xScale = face
+        // Y-only squash. Animating scaleX fought applyTravelFacing every frame and
+        // locked moonwalk after leftward retreat→stomp→run-right in long sessions.
+        _ = x
         body.yScale = 1
-        // Harder impact pose, quicker rebound — reads on a phone screen.
         body.run(SKAction.sequence([
-            SKAction.group([
-                SKAction.scaleX(to: x * face, duration: 0.028),
-                SKAction.scaleY(to: y, duration: 0.028),
-            ]),
-            SKAction.group([
-                SKAction.scaleX(to: 1.12 * face, duration: 0.045),
-                SKAction.scaleY(to: 0.88, duration: 0.045),
-            ]),
-            SKAction.group([
-                SKAction.scaleX(to: face, duration: 0.06),
-                SKAction.scaleY(to: 1, duration: 0.06),
-            ]),
+            SKAction.scaleY(to: y, duration: 0.028),
+            SKAction.scaleY(to: 0.88, duration: 0.045),
+            SKAction.scaleY(to: 1, duration: 0.06),
         ]), withKey: "sq")
     }
 
@@ -1545,8 +1521,7 @@ public final class BanditVisual: SKNode {
             sprite.position.y = 0
             body.yScale = 1
         }
-        // Re-assert facing every frame; preserve squash magnitude if an impact pose is running.
-        refreshFacingScalePreservingSquash()
+        // Facing is applied once in HeistScene.sync via applyTravelFacing — not here.
         // Forward lean while moving — sells speed without needing a new sheet.
         if anim == .run || anim == .walk {
             let lean: CGFloat = anim == .run ? 0.11 : 0.06
@@ -1880,7 +1855,7 @@ public final class BanditVisual: SKNode {
         legF.position = CGPoint(x: 8, y: -14)
         tail.position = CGPoint(x: -14, y: 0)
         sprite.position = .zero
-        applyFacingScale()
+        applyTravelFacing(velocityX: 0, facing: Double(facingSign))
         body.yScale = 1
     }
 

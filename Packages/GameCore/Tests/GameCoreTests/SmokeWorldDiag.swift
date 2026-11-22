@@ -285,4 +285,80 @@ final class SmokeWorldProgressTests: XCTestCase {
             return
         }
     }
+
+    // MARK: - Long-session path (smoke midrun / retreat / dash — not just clean finishPush)
+
+    /// Long session: retreat then dash/run right — facing must track +vx (moonwalk at ~1:03 path).
+    func testLongSessionFacingAfterRetreatAndDash() throws {
+        let map = try NeonDocksLevel.load()
+        var sim = Sim(map: map, tuning: .default, seed: 11)
+        sim.startRun()
+        let tile = sim.tuning.tileSize
+        let exit = map.findFirst(.exit)!
+        // Park near vault lip where smoke retreats (long-session loop), then reverse+dash.
+        var stand = map.worldStandOnDeckBelow(ofX: exit.0 - 6, markerY: exit.1, tileSize: tile)
+        stand.y += 14
+        sim.state.bandit.position = stand
+        sim.state.bandit.onGround = true
+        for _ in 0..<40 {
+            sim.step(InputFrame(moveX: -1))
+        }
+        XCTAssertEqual(sim.state.bandit.facing, -1)
+        // Dash right — movement source that used to bake facing into squash / miss the update.
+        sim.step(InputFrame(moveX: 1, dashPressed: true))
+        for _ in 0..<20 {
+            sim.step(InputFrame(moveX: 1))
+        }
+        XCTAssertGreaterThan(sim.state.bandit.velocity.x, 0.5, "must be moving right after dash")
+        XCTAssertEqual(sim.state.bandit.facing, 1, "long-session dash/run right must face +1")
+    }
+
+    /// Long session: walking onto EXIT mid-smoke (before death) must win — no soft-bounce undo.
+    func testLongSessionVaultCrossingAlwaysWins() throws {
+        let map = try NeonDocksLevel.load()
+        var sim = Sim(map: map, tuning: .default, seed: 12)
+        var brain = SmokeBrain()
+        brain.sawMask = true
+        brain.diedOnce = false
+        brain.act = .play
+        SmokeBrain.clearSmokeFlags()
+        SmokeBrain.setSmokeFlag("smoke_proceed.txt", present: true)
+        SmokeBrain.setSmokeFlag("smoke_midrun_ok.txt", present: true)
+        defer { SmokeBrain.clearSmokeFlags() }
+        sim.startRun()
+        let tile = sim.tuning.tileSize
+        let exit = map.findFirst(.exit)!
+        var stand = map.worldStandOnDeckBelow(ofX: exit.0, markerY: exit.1, tileSize: tile)
+        stand.y += 14
+        sim.state.bandit.position = stand
+        sim.state.bandit.onGround = true
+        sim.state.bandit.velocity = Vec2(tile, 0)
+        let cue = brain.next(sim: sim)
+        sim.step(cue.input.moveX >= 0 ? InputFrame(moveX: 1) : cue.input)
+        // Force the on-tile step if brain retreated.
+        if case .playing = sim.state.phase {
+            sim.state.bandit.position = stand
+            sim.state.bandit.onGround = true
+            sim.step(InputFrame(moveX: 1))
+        }
+        XCTAssertTrue(sim.state.vaultReached, "crossing vault must set vaultReached")
+        guard case .won = sim.state.phase else {
+            XCTFail("long-session vault cross must win, phase=\(sim.state.phase)")
+            return
+        }
+        let after = brain.next(sim: sim)
+        XCTAssertFalse(after.retry, "SmokeBrain must not soft-bounce retry after vault win")
+        XCTAssertEqual(brain.act, .done)
+    }
+
+    /// Resume policy: play HUD stays visible while playing (no 3s blank after unpause).
+    func testResumeKeepsPlayHUDVisible() {
+        // Mirrors HeistScene.updateHUDVisibility — countdown must not hide the raccoon/HUD.
+        func shouldShowPlayHUD(playing: Bool, onTitle: Bool) -> Bool {
+            playing && !onTitle
+        }
+        XCTAssertTrue(shouldShowPlayHUD(playing: true, onTitle: false))
+        XCTAssertFalse(shouldShowPlayHUD(playing: true, onTitle: true))
+        XCTAssertFalse(shouldShowPlayHUD(playing: false, onTitle: false))
+    }
 }

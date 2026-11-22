@@ -816,25 +816,40 @@ public final class HeistScene: SKScene {
                     gem.position = CGPoint(x: pos.x, y: pos.y + tile * 0.15)
                     gem.zPosition = 6
                     world.addChild(gem)
-                case .stash, .exit:
+                case .exit:
                     let door = SKShapeNode(rectOf: CGSize(width: tile * 1.2, height: tile * 1.6), cornerRadius: 4)
                     door.fillColor = SKColor(red: 0.1, green: 0.12, blue: 0.22, alpha: 0.95)
                     door.strokeColor = ArtCatalog.neonLime
                     door.lineWidth = 2
-                    door.glowWidth = kind == .exit ? 3 : 1
+                    door.glowWidth = 3
                     door.position = pos
                     door.zPosition = 6
-                    door.name = kind == .exit ? "exitDoor" : "stashDoor"
+                    door.name = "exitDoor"
                     world.addChild(door)
                     let t = SKLabelNode(fontNamed: "AvenirNext-Bold")
-                    t.text = kind == .exit ? "VAULT" : "STASH"
-                    t.fontSize = kind == .exit ? 12 : 9
+                    t.text = "VAULT"
+                    t.fontSize = 12
                     t.fontColor = ArtCatalog.neonLime
                     t.verticalAlignmentMode = .center
                     door.addChild(t)
-                    if kind == .exit {
-                        placeExitBeacon(at: pos, tile: tile)
-                    }
+                    placeExitBeacon(at: pos, tile: tile)
+                case .stash:
+                    // Stash must not read as a vault — cyan locker, no ▼ VAULT beacon.
+                    let door = SKShapeNode(rectOf: CGSize(width: tile * 1.0, height: tile * 1.2), cornerRadius: 3)
+                    door.fillColor = SKColor(red: 0.08, green: 0.12, blue: 0.2, alpha: 0.92)
+                    door.strokeColor = ArtCatalog.neonCyan
+                    door.lineWidth = 1.5
+                    door.glowWidth = 0.5
+                    door.position = pos
+                    door.zPosition = 6
+                    door.name = "stashDoor"
+                    world.addChild(door)
+                    let t = SKLabelNode(fontNamed: "AvenirNext-Bold")
+                    t.text = "STASH"
+                    t.fontSize = 8
+                    t.fontColor = ArtCatalog.neonCyan
+                    t.verticalAlignmentMode = .center
+                    door.addChild(t)
                 case .oneWay:
                     let plank = SKShapeNode(rectOf: CGSize(width: tile * 0.98, height: tile * 0.18), cornerRadius: 2)
                     plank.fillColor = SKColor(red: 0.18, green: 0.22, blue: 0.32, alpha: 0.95)
@@ -1940,23 +1955,21 @@ public final class HeistScene: SKScene {
         grabTouch = nil
     }
 
-    /// Resume after lifecycle pause: brief 3-2-1, else immediate unpause.
+    /// Resume after lifecycle / pause menu — restore raccoon + HUD immediately (no 3s blank).
     private func beginResumeFromPause() {
         guard runPaused else { return }
         JuiceSound.shared.playUITap()
         runPaused = false
+        pauseFromSystem = false
+        resumeCountdown = 0
         skipFreezeSample = true
         pauseRoot.isHidden = true
-        if pauseFromSystem {
-            pauseFromSystem = false
-            resumeCountdown = 3.0
-            pauseCountLabel?.text = "3"
-            pauseCountLabel?.alpha = 1
-            pauseCountLabel?.setScale(1.2)
-            layoutUI()
-        } else {
-            layoutUI()
-        }
+        pauseCountLabel?.alpha = 0
+        pauseCountLabel?.text = ""
+        bandit.isHidden = false
+        bandit.alpha = 1
+        layoutUI()
+        updateHUDVisibility()
     }
 
     private func setupOutcome() {
@@ -2245,7 +2258,8 @@ public final class HeistScene: SKScene {
         // Title owns the screen — hide live level so geometry/shinies can't peek under UI.
         stage.isHidden = onTitle
         skyFill.isHidden = onTitle
-        let showPlayHUD = playing && resumeCountdown <= 0 && !onTitle
+        // HUD stays up during any residual countdown — never blank the playfield on resume.
+        let showPlayHUD = playing && !onTitle
         playHUD.isHidden = !showPlayHUD
         hudPill.isHidden = !showPlayHUD
         pauseBtn?.isHidden = !showPlayHUD
@@ -2256,13 +2270,17 @@ public final class HeistScene: SKScene {
             for node in [stickBase, stickKnob, jumpBtn, pounceBtn, pauseBtn] as [SKNode?] {
                 node?.alpha = 0
             }
-        } else if playing, resumeCountdown <= 0 {
+        } else if playing {
             let stickA: CGFloat = stickTouch == nil ? 0.22 : 1
             stickBase?.alpha = stickA
             stickKnob?.alpha = stickA
             jumpBtn?.alpha = 1
             pounceBtn?.alpha = 1
             pauseBtn?.alpha = 1
+            dashBtn?.alpha = 1
+            if !maskBtn.isHidden { maskBtn.alpha = 1 }
+            bandit.isHidden = false
+            if bandit.alpha < 0.4 { bandit.alpha = 1 }
         }
     }
 
@@ -3356,16 +3374,12 @@ public final class HeistScene: SKScene {
                 let cue = smoke.next(sim: sim)
                 if cue.start { beginPlay() }
                 if cue.retry {
-                    if case .won = sim.state.phase, !smoke.diedOnce {
-                        // Premature vault (should be rare with pre-vault clamp) — clear .won,
-                        // never soft-bounce past the green VAULT for hundreds of seconds.
-                        sim.state.phase = .playing
-                        sim.state.vaultReached = false
-                        hideOutcome()
-                        clearPlayToasts()
+                    // Vault win is final — never soft-bounce. Retry only from fail / death beat.
+                    skipFreezeSample = true
+                    transitionBudgetMs = max(transitionBudgetMs, 2500)
+                    if case .won = sim.state.phase {
+                        // Already cracked — leave results up; ignore retry cues.
                     } else {
-                        skipFreezeSample = true
-                        transitionBudgetMs = max(transitionBudgetMs, 2500)
                         doRetry()
                     }
                 }
@@ -3391,21 +3405,7 @@ public final class HeistScene: SKScene {
 
             if case .playing = sim.state.phase {
                 sim.step(input)
-                // Smoke pre-death: hard stop one tile short of EXIT so the green VAULT
-                // never cracks early — but leave the street MOP pack reachable so
-                // stomp → stomp-chain shots stay distinct (exitX-3 parked on the lip).
-                if smokeEnabled, !smoke.diedOnce, case .playing = sim.state.phase {
-                    let tile = tuning.tileSize
-                    if let exitX = sim.map.findFirst(.exit)?.0 {
-                        let maxX = Double(exitX - 1) * tile
-                        if sim.state.bandit.position.x > maxX {
-                            sim.state.bandit.position.x = maxX
-                            if sim.state.bandit.velocity.x > 0 {
-                                sim.state.bandit.velocity.x = 0
-                            }
-                        }
-                    }
-                }
+                // Crossing the vault always ends the run — no soft clamp / fake pass.
                 // After Mask, keep the bandit alive through pause/bg so death wait isn't raced by phase=won.
                 if smokeEnabled,
                    smoke.sawMask,
@@ -3712,15 +3712,8 @@ public final class HeistScene: SKScene {
                 shake(0.35)
             case .win:
                 // Only a real EXIT-tile vaultReached may show VAULT CRACKED.
+                // Crossing the vault always ends the run (including smoke) — no undo.
                 guard sim.state.vaultReached else {
-                    writeSmokeStatus()
-                    break
-                }
-                // Smoke: premature vault before the death beat must not sticky-set won=
-                // or flash VAULT CRACKED mid-run. Real clear happens after diedOnce.
-                if smokeEnabled, !smoke.diedOnce {
-                    sim.state.phase = .playing
-                    sim.state.vaultReached = false
                     writeSmokeStatus()
                     break
                 }
@@ -4115,8 +4108,6 @@ public final class HeistScene: SKScene {
         let b = sim.state.bandit
         // Physics uses body center; foot-anchored sprites need the feet on the deck.
         bandit.position = CGPoint(x: CGFloat(b.position.x), y: CGFloat(b.position.y) - bodyCenterToFeet)
-        // Every frame: body.xScale from sign(velocity.x). Source sheets face west.
-        bandit.setFacingFromVelocity(b.velocity.x, fallbackFacing: b.facing)
         let moveSpeed = CGFloat(hypot(b.velocity.x, 0) / max(tuning.tileSize, 1))
         let runSpeed = CGFloat(tuning.runSpeed)
         bandit.show(
@@ -4127,6 +4118,8 @@ public final class HeistScene: SKScene {
             runSpeed: runSpeed,
             smokeLite: false
         )
+        // Sole facing write — after pose/squash so dash, retreat, Mask, and stomps all agree.
+        bandit.applyTravelFacing(velocityX: b.velocity.x, facing: b.facing)
         // Foot puffs while sprinting — motion reads even if the sheet is subtle.
         runDustCooldown -= dt
         if b.onGround, abs(b.velocity.x) > tuning.feel.runSpeed * tuning.tileSize * 0.45, runDustCooldown <= 0 {

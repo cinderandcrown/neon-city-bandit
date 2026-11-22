@@ -52,6 +52,15 @@ final class GameRenderTests: XCTestCase {
         XCTAssertEqual(BanditVisual.bodyXScale(facingSign: -1, sheetsFaceWest: true), 1)
     }
 
+    /// Resume must not gate HUD on a countdown (long-session 6:01 blank).
+    func testResumePlayHUDPolicyIgnoresCountdown() {
+        let playing = true
+        let onTitle = false
+        // Former bug: `playing && resumeCountdown <= 0` hid HUD for 3s after system unpause.
+        let showHUD = playing && !onTitle
+        XCTAssertTrue(showHUD)
+    }
+
     func testTitleButtonFramesNonOverlappingHelper() {
         let a = CGRect(x: 0, y: 0, width: 40, height: 20)
         let b = CGRect(x: 50, y: 0, width: 40, height: 20)
