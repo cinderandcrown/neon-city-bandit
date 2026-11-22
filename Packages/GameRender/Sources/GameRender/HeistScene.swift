@@ -2254,12 +2254,17 @@ public final class HeistScene: SKScene {
             if case .playing = sim.state.phase { return true }
             return false
         }()
+        let failedAwaitingCard: Bool = {
+            if case .failed = sim.state.phase { return outcomeRoot.isHidden }
+            return false
+        }()
         let onTitle = !titleRoot.isHidden || showingPublisherIdent
         // Title owns the screen — hide live level so geometry/shinies can't peek under UI.
         stage.isHidden = onTitle
         skyFill.isHidden = onTitle
-        // HUD stays up during any residual countdown — never blank the playfield on resume.
-        let showPlayHUD = playing && !onTitle
+        // Keep play HUD up during live play AND the death beat until the outcome card
+        // replaces it — never leave an empty street (force-fail / failOutcomeHold blank).
+        let showPlayHUD = (playing || failedAwaitingCard) && !onTitle
         playHUD.isHidden = !showPlayHUD
         hudPill.isHidden = !showPlayHUD
         pauseBtn?.isHidden = !showPlayHUD
@@ -2270,7 +2275,7 @@ public final class HeistScene: SKScene {
             for node in [stickBase, stickKnob, jumpBtn, pounceBtn, pauseBtn] as [SKNode?] {
                 node?.alpha = 0
             }
-        } else if playing {
+        } else if playing || failedAwaitingCard {
             let stickA: CGFloat = stickTouch == nil ? 0.22 : 1
             stickBase?.alpha = stickA
             stickKnob?.alpha = stickA
@@ -2604,8 +2609,13 @@ public final class HeistScene: SKScene {
         objectiveBanner?.removeFromParent()
         objectiveBanner = nil
         sim.retry()
+        // Clean vault push always faces east — death wait may have left facing stale.
+        sim.state.bandit.facing = 1
         hideOutcome()
-        snapCameraToHero()
+        snapCameraToHero(lead: true)
+        bandit.isHidden = false
+        bandit.alpha = 1
+        bandit.applyTravelFacing(velocityX: 0, facing: 1)
         // Keep pre-death heroX min/max for the CI framing gate — finishPush sprints
         // to EXIT and must not wipe (or re-sample) the live-play band.
         if !smoke.diedOnce {
@@ -2630,11 +2640,50 @@ public final class HeistScene: SKScene {
     }
 
     /// Instantly park the camera on the hero so the first frames aren't focus=(0,0) → negative heroX.
-    private func snapCameraToHero() {
-        cameraFacing = sim.state.bandit.facing >= 0 ? 1 : -1
+    private func snapCameraToHero(lead: Bool = true) {
+        if lead {
+            cameraFacing = sim.state.bandit.facing >= 0 ? 1 : -1
+        } else {
+            // Death / outcome: no look-ahead — lead drift was the 8:59 empty-street pan.
+            cameraFacing = 0
+            cameraWantFace = 0
+        }
         cameraFocus = cameraTarget(for: sim.state.bandit)
         let z = Self.worldZoom
         stage.position = CGPoint(x: -cameraFocus.x * z, y: -cameraFocus.y * z)
+    }
+
+    /// Shared death presentation — real canal splash and harness force-fail both use this
+    /// so HUD/camera/facing never go blank while waiting for smoke_death_ok.
+    private func presentFail(_ reason: FailReason) {
+        smokeStatus.died = true
+        JuiceSound.shared.playKO()
+        JuiceSound.shared.setMaskModeMusic(false)
+        clearMaskGrade()
+        sim.state.bandit.invuln = 0
+        sim.state.bandit.velocity = .zero
+        sim.state.bandit.anim = .death
+        sim.state.bandit.animHold = 2.0
+        // Face the last travel direction (or east) — never leave a left facing while the
+        // camera settles, which read as moonwalk during the death wait pan.
+        if abs(sim.state.bandit.facing) < 0.5 {
+            sim.state.bandit.facing = 1
+        }
+        bandit.alpha = 1
+        bandit.zPosition = 55
+        bandit.isHidden = false
+        bandit.applyTravelFacing(velocityX: 0, facing: sim.state.bandit.facing)
+        hitStop = max(hitStop, 0.28)
+        snapCameraToHero(lead: false)
+        let maskOk = SmokeBrain.smokeFlagExists("smoke_mask_ok.txt")
+        if smokeEnabled, !maskOk {
+            writeSmokeStatus()
+        } else {
+            failOutcomeHold = 1.35
+            skipFreezeSample = true
+            writeSmokeStatus()
+        }
+        updateHUDVisibility()
     }
 
     private func resetHeroFramingSamples() {
@@ -3453,30 +3502,33 @@ public final class HeistScene: SKScene {
                         smokeSawMaskDropAfterFirst = true
                     }
                     // Harness: dump Bandit into canal water for the death beat if seekDeath stalls.
-                    // Force phase=failed immediately — teleport alone can miss a sim tick before
-                    // the harness hard-timeout (seen when soft-arm and hard-fail shared a loop).
+                    // Must go through presentFail — a bare phase=failed hid the HUD and let the
+                    // right-lead camera pan to an empty street (smoke 8:59–9:15 moonwalk blank).
                     if SmokeBrain.smokeFlagExists("smoke_force_fail.txt"),
                        case .playing = sim.state.phase
                     {
                         let tile = tuning.tileSize
+                        // Keep the bandit on the visible street deck near the canal column —
+                        // teleporting into the underground water cell left an empty street
+                        // while the right-lead camera kept panning (8:59 blank).
                         if let water = sim.map.findFirst(.water) {
-                            sim.state.bandit.position = Vec2(
-                                (Double(water.0) + 0.5) * tile,
-                                (Double(water.1) + 0.5) * tile
+                            let streetY = sim.map.findFirst(.start)?.1 ?? (water.1 + 2)
+                            let stand = sim.map.worldStandOnDeckBelow(
+                                ofX: water.0, markerY: streetY + 1, tileSize: tile
                             )
+                            sim.state.bandit.position = Vec2(stand.x, stand.y + 14)
                         }
-                        sim.state.bandit.velocity = .zero
-                        sim.state.bandit.invuln = 0
+                        sim.state.bandit.onGround = true
                         sim.state.bandit.maskMode = false
                         sim.state.bandit.maskTimer = 0
                         sim.state.bandit.hearts = 0
+                        sim.state.bandit.facing = 1
                         sim.state.phase = .failed(.fellInWater)
                         smoke.act = .seekDeath
                         smoke.diedOnce = true
-                        smokeStatus.died = true
-                        // Harness dump can hitch a frame — don't fail the freeze gate on it.
                         skipFreezeSample = true
                         transitionBudgetMs = max(transitionBudgetMs, 2000)
+                        presentFail(.fellInWater)
                     }
                     // Pin Mask open only while the harness is actively capturing 04 / 04b
                     // (smoke_capture_mask.txt). Do NOT pin from midrun→stomp-chain — that
@@ -3724,25 +3776,12 @@ public final class HeistScene: SKScene {
                 showOutcome()
                 writeSmokeStatus()
             case .fail:
-                smokeStatus.died = true
-                JuiceSound.shared.playKO()
-                JuiceSound.shared.setMaskModeMusic(false)
-                clearMaskGrade()
-                // Full-opacity KO in front of the MOP — cancel i-frame blink / ghosting.
-                sim.state.bandit.invuln = 0
-                bandit.alpha = 1
-                bandit.zPosition = 55
-                hitStop = max(hitStop, 0.28)
-                // Hold so the bandit death sheet plays before SPLASHED.
-                // Smoke still defers the card until the Mask screenshot flag lands.
-                let maskOk = SmokeBrain.smokeFlagExists("smoke_mask_ok.txt")
-                if smokeEnabled, !maskOk {
-                    writeSmokeStatus()
-                } else {
-                    failOutcomeHold = 1.35
-                    skipFreezeSample = true
-                    writeSmokeStatus()
-                }
+                // Same path as harness force-fail — HUD + locked camera + death pose.
+                let reason: FailReason = {
+                    if case .failed(let r) = sim.state.phase { return r }
+                    return .bagged
+                }()
+                presentFail(reason)
             case .checkpoint:
                 playSFX(.sfxCheckpoint)
                 hitSpark(at: e.position, color: ArtCatalog.neonLime)
@@ -4277,41 +4316,58 @@ public final class HeistScene: SKScene {
             }
         }
 
-        // Single look-ahead: facing × 0.20×viewW → hero at ~30% (right) / ~70% (left).
-        // Side-switch delay: ignore brief facing flips so a quick reverse doesn't park the
-        // hero near ~70% while he faces right again.
-        let rawWant: CGFloat = b.facing >= 0 ? 1 : -1
-        let nowFace = CACurrentMediaTime()
-        // ~0.9s side-switch delay so a quick reverse can't whip the hero to ~70%.
-        if rawWant != cameraWantFace {
-            if nowFace >= cameraFacingHoldUntil {
-                cameraWantFace = rawWant
+        let z = Self.worldZoom
+        let livePlay: Bool = {
+            if case .playing = sim.state.phase, !runPaused, failOutcomeHold <= 0 { return true }
+            return false
+        }()
+        let heroFrac: Double
+        if livePlay {
+            // Single look-ahead: facing × 0.20×viewW → hero at ~30% (right) / ~70% (left).
+            // Side-switch delay: ignore brief facing flips so a quick reverse doesn't park the
+            // hero near ~70% while he faces right again.
+            let rawWant: CGFloat = b.facing >= 0 ? 1 : -1
+            let nowFace = CACurrentMediaTime()
+            // ~0.9s side-switch delay so a quick reverse can't whip the hero to ~70%.
+            if rawWant != cameraWantFace {
+                if nowFace >= cameraFacingHoldUntil {
+                    cameraWantFace = rawWant
+                    cameraFacingHoldUntil = nowFace + 0.9
+                }
+            } else {
                 cameraFacingHoldUntil = nowFace + 0.9
             }
+            let faceBlend = min(1, CGFloat(dt) / 0.32)
+            cameraFacing += (cameraWantFace - cameraFacing) * faceBlend
+            var target = cameraTarget(for: b)
+            // Speed-scaled follow: sprint locks on; idle eases. Stops the camera feeling sticky.
+            let speedFrac = min(1, CGFloat(abs(b.velocity.x)) / max(1, CGFloat(tuning.feel.runSpeed * tuning.tileSize)))
+            let s = min(1, CGFloat(tuning.cameraSmooth) * (1.45 + 0.9 * speedFrac))
+            cameraFocus.x += (target.x - cameraFocus.x) * s
+            cameraFocus.y += (target.y - cameraFocus.y) * s
+            // Keep the hero in the 22–40% band while the right lead is active.
+            var banditSceneX = z * (CGFloat(b.position.x) - cameraFocus.x)
+            var frac = Double((banditSceneX + size.width * 0.5) / max(size.width, 1))
+            if cameraWantFace > 0, cameraFacing > 0.85, (frac > 0.40 || frac < 0.22) {
+                let desired = size.width * (0.30 - 0.5) // scene-x for 30% of width
+                cameraFocus.x = CGFloat(b.position.x) - desired / z
+                target = cameraTarget(for: b)
+                cameraFocus.x += (target.x - cameraFocus.x) * 0.55
+                banditSceneX = z * (CGFloat(b.position.x) - cameraFocus.x)
+                frac = Double((banditSceneX + size.width * 0.5) / max(size.width, 1))
+            }
+            heroFrac = frac
+            stage.position = CGPoint(x: -cameraFocus.x * z, y: -cameraFocus.y * z)
         } else {
-            cameraFacingHoldUntil = nowFace + 0.9
-        }
-        let faceBlend = min(1, CGFloat(dt) / 0.32)
-        cameraFacing += (cameraWantFace - cameraFacing) * faceBlend
-        var target = cameraTarget(for: b)
-        // Speed-scaled follow: sprint locks on; idle eases. Stops the camera feeling sticky.
-        let speedFrac = min(1, CGFloat(abs(b.velocity.x)) / max(1, CGFloat(tuning.feel.runSpeed * tuning.tileSize)))
-        let s = min(1, CGFloat(tuning.cameraSmooth) * (1.45 + 0.9 * speedFrac))
-        cameraFocus.x += (target.x - cameraFocus.x) * s
-        cameraFocus.y += (target.y - cameraFocus.y) * s
-        let z = Self.worldZoom
-        // Keep the hero in the 22–40% band while the right lead is active.
-        var banditSceneX = z * (CGFloat(b.position.x) - cameraFocus.x)
-        var heroFrac = Double((banditSceneX + size.width * 0.5) / max(size.width, 1))
-        if cameraWantFace > 0, cameraFacing > 0.85, (heroFrac > 0.40 || heroFrac < 0.22) {
-            let desired = size.width * (0.30 - 0.5) // scene-x for 30% of width
-            cameraFocus.x = CGFloat(b.position.x) - desired / z
-            target = cameraTarget(for: b)
-            cameraFocus.x += (target.x - cameraFocus.x) * 0.55
-            banditSceneX = z * (CGFloat(b.position.x) - cameraFocus.x)
+            // Death / pause / outcome: lock on the raccoon with no look-ahead so a
+            // stopped bandit never "moonwalks" off-screen while the lead keeps panning.
+            cameraFacing = 0
+            cameraWantFace = 0
+            cameraFocus = cameraTarget(for: b)
+            stage.position = CGPoint(x: -cameraFocus.x * z, y: -cameraFocus.y * z)
+            let banditSceneX = z * (CGFloat(b.position.x) - cameraFocus.x)
             heroFrac = Double((banditSceneX + size.width * 0.5) / max(size.width, 1))
         }
-        stage.position = CGPoint(x: -cameraFocus.x * z, y: -cameraFocus.y * z)
         // Mid-level surprise earlier so the first-minute lull after Mask still has a beat.
         if case .playing = sim.state.phase, !runPaused, !midSurpriseFired {
             let tx = Int(floor(b.position.x / tuning.tileSize))

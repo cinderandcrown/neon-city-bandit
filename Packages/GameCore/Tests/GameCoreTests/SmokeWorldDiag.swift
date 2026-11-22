@@ -397,4 +397,19 @@ final class SmokeWorldProgressTests: XCTestCase {
         XCTAssertFalse(shouldShowPlayHUD(playing: true, onTitle: true))
         XCTAssertFalse(shouldShowPlayHUD(playing: false, onTitle: false))
     }
+
+    /// Long-session death beat: force-fail / .failed keeps a visible bandit on a standable
+    /// deck (not underground water) so the camera can lock on them.
+    func testLongSessionForceFailStandsOnStreetDeck() throws {
+        let map = try NeonDocksLevel.load()
+        let tile = 32.0
+        guard let water = map.findFirst(.water) else {
+            throw XCTSkip("Neon Docks has no water tile")
+        }
+        let streetY = map.findFirst(.start)!.1
+        let stand = map.worldStandOnDeckBelow(ofX: water.0, markerY: streetY + 1, tileSize: tile)
+        // Street stand must be above the underground water cell.
+        let waterCenterY = (Double(water.1) + 0.5) * tile
+        XCTAssertGreaterThan(stand.y, waterCenterY, "force-fail must not bury the bandit in the canal cell")
+    }
 }
