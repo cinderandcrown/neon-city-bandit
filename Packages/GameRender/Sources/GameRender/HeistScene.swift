@@ -1970,7 +1970,7 @@ public final class HeistScene: SKScene {
         wash.name = "outcomeWash"
         outcomeRoot.addChild(wash)
 
-        let card = SKShapeNode(rectOf: CGSize(width: 300, height: 400), cornerRadius: 14)
+        let card = SKShapeNode(rectOf: CGSize(width: 300, height: 420), cornerRadius: 14)
         card.fillColor = SKColor(red: 0.07, green: 0.05, blue: 0.16, alpha: 0.96)
         card.strokeColor = ArtCatalog.neonCyan
         card.lineWidth = 2.5
@@ -2056,10 +2056,10 @@ public final class HeistScene: SKScene {
         pa.fontColor = ArtCatalog.neonPink
         pa.preferredMaxLayoutWidth = 240
         pa.numberOfLines = 2
-        // Separate band between hint and CTA — never overlap GO FOR 3★.
-        pa.verticalAlignmentMode = .center
+        // PA sits between hint and CTA with ≥40pt clear air above the button top.
+        pa.verticalAlignmentMode = .bottom
         pa.horizontalAlignmentMode = .center
-        pa.position = CGPoint(x: 0, y: -72)
+        pa.position = CGPoint(x: 0, y: -88)
         pa.isHidden = true
         card.addChild(pa)
 
@@ -2070,14 +2070,14 @@ public final class HeistScene: SKScene {
         card.addChild(stats)
 
         let primary = makeOutcomeButton(title: "RETRY", color: ArtCatalog.neonLime, name: "retryBtn", wide: true)
-        primary.position = CGPoint(x: 0, y: -140)
+        primary.position = CGPoint(x: 0, y: -158)
         card.addChild(primary)
         let next = makeOutcomeButton(title: "NEXT", color: ArtCatalog.neonLime, name: "nextBtn", wide: true)
-        next.position = CGPoint(x: 0, y: -140)
+        next.position = CGPoint(x: 0, y: -158)
         next.isHidden = true
         card.addChild(next)
         let home = makeOutcomeButton(title: "HOME", color: ArtCatalog.neonPink, name: "homeBtn", wide: false)
-        home.position = CGPoint(x: 0, y: -192)
+        home.position = CGPoint(x: 0, y: -210)
         card.addChild(home)
     }
 
