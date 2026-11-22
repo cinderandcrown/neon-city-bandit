@@ -242,9 +242,11 @@ public enum SpriteCycles {
 
     /// Bandit is the visual hero (~1.2× prior); basic MOPs sit ~0.8× bandit height.
     /// Hitboxes stay in GameCore (unchanged / generous).
-    public static let banditDisplaySize = CGSize(width: 124, height: 124)
-    public static let mopDisplaySize = CGSize(width: 100, height: 100)
-    public static let bossDisplaySize = CGSize(width: 168, height: 168)
+    /// On-screen bandit footprint — keep ~15–18% of iPhone width at worldZoom ≈1.05.
+    public static let banditDisplaySize = CGSize(width: 64, height: 64)
+    /// Basic MOPs sit ~0.8× bandit height so threats read without crowding the runway.
+    public static let mopDisplaySize = CGSize(width: 52, height: 52)
+    public static let bossDisplaySize = CGSize(width: 88, height: 88)
 
     private static func loadIndexIfNeeded() {
         guard !didLoadIndex else { return }

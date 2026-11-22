@@ -17,9 +17,8 @@ public struct Tuning: Equatable, Sendable {
     public var comboCap: Int = 10
     /// Stomps to trigger Mask. Nicholas APPROVED 2026-11-17: **3** (replaces 5).
     public var maskModeAtCombo: Int = 3
-    /// How long Mask Mode stays on after it's earned (screenshot + power fantasy window).
-    /// Keep ≥20 so CI can snap 04 before pause/bg beats without racing the timer.
-    public var maskDuration: Double = 22
+    /// Mask Mode smash window when the player spends a full meter charge.
+    public var maskDuration: Double = 5
     public var hearts: Int = 3
     public var shiniesToHint: Int = 12
 

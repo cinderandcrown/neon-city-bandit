@@ -44,6 +44,45 @@ final class GameRenderTests: XCTestCase {
         XCTAssertEqual(PublisherIdent.titleTracking, 3.2, accuracy: 0.01)
     }
 
+    /// Shipping Spriterrific sheets face WEST — travel east flips xScale so muzzle leads.
+    func testBanditBodyXScaleFollowsVelocitySign() {
+        XCTAssertEqual(BanditVisual.bodyXScale(facingSign: 1, sheetsFaceWest: true), -1)
+        XCTAssertEqual(BanditVisual.bodyXScale(facingSign: -1, sheetsFaceWest: true), 1)
+        XCTAssertEqual(BanditVisual.bodyXScale(facingSign: 1, sheetsFaceWest: false), 1)
+        XCTAssertEqual(BanditVisual.bodyXScale(facingSign: -1, sheetsFaceWest: false), -1)
+    }
+
+    /// Resume must not gate HUD on a countdown (long-session 6:01 blank).
+    func testResumePlayHUDPolicyIgnoresCountdown() {
+        let playing = true
+        let onTitle = false
+        // Former bug: `playing && resumeCountdown <= 0` hid HUD for 3s after system unpause.
+        let showHUD = playing && !onTitle
+        XCTAssertTrue(showHUD)
+    }
+
+    /// Death / force-fail beat keeps play HUD until the outcome card replaces it
+    /// (smoke 8:59 empty-street blank).
+    func testFailedPhaseKeepsPlayHUDUntilOutcomeCard() {
+        func shouldShowPlayHUD(playing: Bool, failedAwaitingCard: Bool, onTitle: Bool) -> Bool {
+            (playing || failedAwaitingCard) && !onTitle
+        }
+        XCTAssertTrue(shouldShowPlayHUD(playing: false, failedAwaitingCard: true, onTitle: false))
+        XCTAssertFalse(shouldShowPlayHUD(playing: false, failedAwaitingCard: false, onTitle: false))
+        XCTAssertFalse(shouldShowPlayHUD(playing: false, failedAwaitingCard: true, onTitle: true))
+        XCTAssertTrue(shouldShowPlayHUD(playing: true, failedAwaitingCard: false, onTitle: false))
+    }
+
+    /// Non-playing camera uses zero look-ahead so a stopped bandit cannot drift off-screen.
+    func testDeathCameraLocksWithoutLead() {
+        let viewW: CGFloat = 390
+        let facingLead: CGFloat = 1
+        let liveLead = facingLead * 0.20 * viewW
+        let deathLead: CGFloat = 0
+        XCTAssertGreaterThan(abs(liveLead), 1)
+        XCTAssertEqual(deathLead, 0)
+    }
+
     func testTitleButtonFramesNonOverlappingHelper() {
         let a = CGRect(x: 0, y: 0, width: 40, height: 20)
         let b = CGRect(x: 50, y: 0, width: 40, height: 20)

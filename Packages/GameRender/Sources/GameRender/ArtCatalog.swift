@@ -291,14 +291,16 @@ public enum ArtCatalog {
         return true
     }
 
-    /// Far-parallax perspective grid horizon (baked texture, additive, one node).
+    /// Far-parallax perspective grid horizon — dim/blurred so it never reads as walkable floor.
     public static func makePerspectiveGridHorizon(width: CGFloat, height: CGFloat) -> SKSpriteNode {
         let tex = perspectiveGridTexture()
         let n = SKSpriteNode(texture: tex, size: CGSize(width: width, height: height))
         n.name = "gridHorizon"
         n.blendMode = .add
-        n.alpha = 0.42
+        n.alpha = 0.12
         n.zPosition = -28
+        n.color = SKColor(red: 0.2, green: 0.15, blue: 0.35, alpha: 1)
+        n.colorBlendFactor = 0.55
         return n
     }
 
@@ -468,11 +470,12 @@ public enum ArtCatalog {
         return SKTileSet(tileGroups: groups)
     }
 
-    /// Quiet dark plate + cyan top lip (and optional side seams). No repeating crate grid.
+    /// Solid filled top + bright lit edge. Interior fills stay matte so BG never reads as floor.
     private static var cleanPlateCache: [Int: SKTexture] = [:]
 
     public static func cleanPlatformTexture(tileSize: CGSize, mask: Int) -> SKTexture {
-        let key = mask & 0x1F
+        // Bump cache key when look changes so CI/simulators don't keep stale plates.
+        let key = (mask & 0x1F) | 0x100
         if let cached = cleanPlateCache[key] { return cached }
         let format = UIGraphicsImageRendererFormat()
         format.opaque = false
@@ -481,26 +484,30 @@ public enum ArtCatalog {
             let cg = ctx.cgContext
             let w = tileSize.width
             let h = tileSize.height
-            // Deep charcoal fill — stays behind bandit/MOPs/loot.
-            cg.setFillColor(UIColor(red: 0.07, green: 0.06, blue: 0.12, alpha: 1).cgColor)
+            // Opaque slate fill — reads as real ground, not a neon grid plate.
+            cg.setFillColor(UIColor(red: 0.10, green: 0.09, blue: 0.16, alpha: 1).cgColor)
             cg.fill(CGRect(origin: .zero, size: tileSize))
-            cg.setFillColor(UIColor(red: 0.11, green: 0.10, blue: 0.18, alpha: 1).cgColor)
+            cg.setFillColor(UIColor(red: 0.14, green: 0.13, blue: 0.22, alpha: 1).cgColor)
             cg.fill(CGRect(x: 1, y: 1, width: w - 2, height: h - 2))
-            // Bright walkable lip when open above (no N neighbour).
+            // Always paint a bright walkable top edge on exposed tops.
             let openTop = (mask & 1) == 0
-            if openTop || mask == 15 || mask == 14 || mask == 13 || mask == 11 || mask == 7 {
-                cg.setFillColor(UIColor(red: 0.25, green: 0.98, blue: 1.0, alpha: 0.95).cgColor)
-                cg.fill(CGRect(x: 0, y: h - 4, width: w, height: 4))
-                cg.setFillColor(UIColor(red: 1.0, green: 0.28, blue: 0.72, alpha: 0.35).cgColor)
-                cg.fill(CGRect(x: 0, y: h - 5.5, width: w, height: 1.5))
+            if openTop || mask == 15 || mask == 14 || mask == 13 || mask == 11 || mask == 7 || mask == 0 {
+                // Soft under-glow
+                cg.setFillColor(UIColor(red: 1.0, green: 0.35, blue: 0.75, alpha: 0.45).cgColor)
+                cg.fill(CGRect(x: 0, y: h - 7, width: w, height: 3))
+                // Hot lit lip
+                cg.setFillColor(UIColor(red: 0.55, green: 1.0, blue: 0.95, alpha: 1).cgColor)
+                cg.fill(CGRect(x: 0, y: h - 5, width: w, height: 5))
+                cg.setFillColor(UIColor(red: 1.0, green: 1.0, blue: 1.0, alpha: 0.85).cgColor)
+                cg.fill(CGRect(x: 0, y: h - 2, width: w, height: 2))
             }
             // Soft side seam when open east/west.
             if (mask & 2) == 0 {
-                cg.setFillColor(UIColor(red: 0.18, green: 0.16, blue: 0.28, alpha: 1).cgColor)
+                cg.setFillColor(UIColor(red: 0.22, green: 0.20, blue: 0.32, alpha: 1).cgColor)
                 cg.fill(CGRect(x: w - 2, y: 0, width: 2, height: h))
             }
             if (mask & 8) == 0 {
-                cg.setFillColor(UIColor(red: 0.18, green: 0.16, blue: 0.28, alpha: 1).cgColor)
+                cg.setFillColor(UIColor(red: 0.22, green: 0.20, blue: 0.32, alpha: 1).cgColor)
                 cg.fill(CGRect(x: 0, y: 0, width: 2, height: h))
             }
         }
@@ -1187,7 +1194,7 @@ public final class BanditVisual: SKNode {
     private var flopTex: SKTexture?
     private var maskTex: SKTexture?
     private var bobPhase: CGFloat = 0
-    /// World facing: +1 = right/east. Sheets face west, so body.xScale = −facingSign.
+    /// World facing: +1 = right/east. Source run/idle sheets face WEST (muzzle left).
     private var facingSign: CGFloat = 1
     private var usesWestSheets = true
     private var footAnchorY: CGFloat = 0.14
@@ -1257,14 +1264,17 @@ public final class BanditVisual: SKNode {
         if let victoryC {
             cycles["victory"] = victoryC
         }
-        usesWestSheets = sheetDriven
+        // Shipping Spriterrific / library sheets face WEST (meta direction "w").
+        // body.xScale must flip when traveling east — usesWestSheets=false was the
+        // long-session moonwalk (muzzle left while vx > 0).
+        usesWestSheets = runC?.facesWest ?? idleC?.facesWest ?? true
 
         if !sheetDriven {
             let licensedRun = ArtCatalog.licensedCycleTextures("run", maxFrames: 12)
             runTextures = licensedRun.count >= 6 ? licensedRun : ArtCatalog.textures(AssetManifest.runCycle)
             idleTextures = ArtCatalog.licensedCycleTextures("idle", maxFrames: 8)
             jumpTextures = ArtCatalog.licensedCycleTextures("jump", maxFrames: 8)
-            usesWestSheets = false
+            usesWestSheets = true
         }
 
         idleTex = idleTextures.first ?? ArtCatalog.texture(.raccoonIdle)
@@ -1389,7 +1399,7 @@ public final class BanditVisual: SKNode {
             rig.addChild(n)
         }
         name = "bandit"
-        applyFacingScale()
+        applyTravelFacing(velocityX: 0, facing: Double(facingSign))
 
         for i in 0..<trailPoolSize {
             let speck = SKSpriteNode(texture: idleTex, size: SpriteCycles.banditDisplaySize)
@@ -1423,50 +1433,40 @@ public final class BanditVisual: SKNode {
 
     public func setFacing(_ facing: Double) {
         facingSign = facing >= 0 ? 1 : -1
-        applyFacingScale()
+        // Facing scale is owned by applyTravelFacing (called once per frame from sync).
+    }
+
+    /// Sole facing writer — call once per frame after pose/squash so every movement
+    /// source (run, dash, knockback, retreat, Mask) ends at the same xScale.
+    /// `facing` is the sim's authoritative travel facing (move-intent first, then vx).
+    public func applyTravelFacing(velocityX: Double, facing: Double) {
+        _ = velocityX
+        facingSign = facing >= 0 ? 1 : -1
+        let face = bodyFaceScale()
         sprite.xScale = abs(sprite.xScale)
+        // Always assert travel sign — never leave a stale scale from pose/squash/trails.
+        body.xScale = face
+    }
+
+    /// Testable: west sheets flip when velocity/facing points east (+1).
+    public static func bodyXScale(facingSign: CGFloat, sheetsFaceWest: Bool) -> CGFloat {
+        sheetsFaceWest ? -facingSign : facingSign
     }
 
     private func bodyFaceScale() -> CGFloat {
-        // West-facing sheets: flip when facing right (+1).
-        usesWestSheets ? -facingSign : facingSign
-    }
-
-    private func applyFacingScale() {
-        body.xScale = bodyFaceScale()
-    }
-
-    /// Keep west-sheet flip correct without clobbering an in-flight squash scaleX.
-    private func refreshFacingScalePreservingSquash() {
-        let face = bodyFaceScale()
-        if body.action(forKey: "sq") != nil {
-            if (body.xScale >= 0) != (face >= 0) {
-                body.xScale = -body.xScale
-            }
-        } else {
-            body.xScale = face
-        }
+        Self.bodyXScale(facingSign: facingSign, sheetsFaceWest: usesWestSheets)
     }
 
     public func squash(x: CGFloat, y: CGFloat) {
         body.removeAction(forKey: "sq")
-        let face = bodyFaceScale()
-        body.xScale = face
+        // Y-only squash. Animating scaleX fought applyTravelFacing every frame and
+        // locked moonwalk after leftward retreat→stomp→run-right in long sessions.
+        _ = x
         body.yScale = 1
-        // Harder impact pose, quicker rebound — reads on a phone screen.
         body.run(SKAction.sequence([
-            SKAction.group([
-                SKAction.scaleX(to: x * face, duration: 0.028),
-                SKAction.scaleY(to: y, duration: 0.028),
-            ]),
-            SKAction.group([
-                SKAction.scaleX(to: 1.12 * face, duration: 0.045),
-                SKAction.scaleY(to: 0.88, duration: 0.045),
-            ]),
-            SKAction.group([
-                SKAction.scaleX(to: face, duration: 0.06),
-                SKAction.scaleY(to: 1, duration: 0.06),
-            ]),
+            SKAction.scaleY(to: y, duration: 0.028),
+            SKAction.scaleY(to: 0.88, duration: 0.045),
+            SKAction.scaleY(to: 1, duration: 0.06),
         ]), withKey: "sq")
     }
 
@@ -1515,8 +1515,7 @@ public final class BanditVisual: SKNode {
             sprite.position.y = 0
             body.yScale = 1
         }
-        // Re-assert facing every frame; preserve squash magnitude if an impact pose is running.
-        refreshFacingScalePreservingSquash()
+        // Facing is applied once in HeistScene.sync via applyTravelFacing — not here.
         // Forward lean while moving — sells speed without needing a new sheet.
         if anim == .run || anim == .walk {
             let lean: CGFloat = anim == .run ? 0.11 : 0.06
@@ -1850,7 +1849,7 @@ public final class BanditVisual: SKNode {
         legF.position = CGPoint(x: 8, y: -14)
         tail.position = CGPoint(x: -14, y: 0)
         sprite.position = .zero
-        applyFacingScale()
+        applyTravelFacing(velocityX: 0, facing: Double(facingSign))
         body.yScale = 1
     }
 

@@ -74,7 +74,8 @@ jobs:
   build:
     name: Build and test (iPhone)
     runs-on: xcode-27
-    timeout-minutes: 60
+    # Smoke (~45m) + SE layout create/boot (~10m) needs headroom past the old 60m cap.
+    timeout-minutes: 90
     permissions:
       contents: read
     steps:
@@ -181,6 +182,60 @@ jobs:
             rm -rf smoke-artifacts
             ./scripts/simulator_smoke.sh "$device" "$app" smoke-artifacts
           fi
+
+      - name: Layout shots (16 Pro + SE)
+        if: success()
+        env:
+          DEVICE: ${{ steps.tests.outputs.device }}
+        run: |
+          set -euo pipefail
+          app="$(find DerivedData/Build/Products -name 'Magpie.app' -type d | head -1)"
+          test -n "$app"
+          chmod +x scripts/simulator_layout_shots.sh
+          # DEVICE is the smoke Pro-class udid — layout script also creates SE (3rd gen).
+          ./scripts/simulator_layout_shots.sh "$app" smoke-artifacts
+          test -s smoke-artifacts/layout-16pro-play.png
+          test -s smoke-artifacts/layout-se-play.png
+          python3 - <<'PY'
+          import struct, zlib
+          def png_size(path):
+              with open(path, "rb") as f:
+                  sig = f.read(8)
+                  assert sig.startswith(b"\x89PNG"), path
+                  length = int.from_bytes(f.read(4), "big")
+                  ctype = f.read(4)
+                  assert ctype == b"IHDR", path
+                  data = f.read(length)
+                  w, h = struct.unpack(">II", data[:8])
+                  return w, h
+          pro = png_size("smoke-artifacts/layout-16pro-play.png")
+          se = png_size("smoke-artifacts/layout-se-play.png")
+          print(f"layout-16pro-play {pro[0]}x{pro[1]}")
+          print(f"layout-se-play {se[0]}x{se[1]}")
+          if se == pro:
+              raise SystemExit("FAIL: SE and Pro layout stills have identical pixel size")
+          # SE 3rd gen is 750×1334 (or 1500×2668 @2x) — ~16:9. Pro is taller (~19.5:9).
+          se_ar = se[1] / se[0]
+          expect = 1334 / 750
+          if abs(se_ar - expect) > 0.08:
+              raise SystemExit(f"FAIL: SE aspect {se_ar:.3f} not SE-class (want ~{expect:.3f})")
+          if se[0] not in (750, 1500) and not (700 <= se[0] <= 1600 and abs(se_ar - expect) < 0.05):
+              raise SystemExit(f"FAIL: unexpected SE size {se[0]}x{se[1]}")
+          # Require the shutter-time smoke status (titleHidden=1 + playing).
+          from pathlib import Path
+          st = Path("smoke-artifacts/layout-se-play-status.txt")
+          if not st.is_file():
+              raise SystemExit("FAIL: missing layout-se-play-status.txt")
+          line = st.read_text()
+          print("layout-se-play-status:", line.strip()[:220])
+          if "phase=playing" not in line or "titleHidden=1" not in line:
+              raise SystemExit(f"FAIL: SE play still not live gameplay ({line[:160]!r})")
+          if "elapsed=" in line:
+              import re
+              m = re.search(r"elapsed=([0-9.]+)", line)
+              if not m or float(m.group(1)) < 2.5:
+                  raise SystemExit(f"FAIL: SE play elapsed too low ({line[:160]!r})")
+          PY
 
       - name: Upload smoke artifacts
         if: always()

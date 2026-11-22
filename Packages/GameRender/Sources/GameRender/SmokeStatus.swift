@@ -49,6 +49,8 @@ public struct SmokeStatus: Equatable, Sendable {
     public var roof: Bool
     /// Seconds of live play with unchanged worldTX (soft-lock detector).
     public var stallSec: Double
+    /// 1 when titleRoot is hidden (live playfield on screen) — layout shots must require this.
+    public var titleHidden: Bool
 
     public init(
         phase: String = "title",
@@ -78,7 +80,8 @@ public struct SmokeStatus: Equatable, Sendable {
         worldTXMax: Int = 0,
         titleOk: Bool = false,
         roof: Bool = false,
-        stallSec: Double = 0
+        stallSec: Double = 0,
+        titleHidden: Bool = false
     ) {
         self.phase = phase
         self.boot = boot
@@ -108,29 +111,32 @@ public struct SmokeStatus: Equatable, Sendable {
         self.titleOk = titleOk
         self.roof = roof
         self.stallSec = stallSec
+        self.titleHidden = titleHidden
     }
 
     public var line: String {
         String(
-            format: "phase=%@ boot=%@ fps=%.1f samples=%d maxFrameMs=%.0f stomps=%d shinies=%d mask=%d maskOn=%d died=%d won=%d elapsed=%.1f wallElapsed=%.1f debugLabels=%d combo=%d medals=%d map=%d daily=%d paused=%d heroX=%.3f heroXMin=%.3f heroXMax=%.3f worldTX=%d worldTY=%d worldTXMax=%d titleOk=%d roof=%d stallSec=%.1f",
+            format: "phase=%@ boot=%@ fps=%.1f samples=%d maxFrameMs=%.0f stomps=%d shinies=%d mask=%d maskOn=%d died=%d won=%d elapsed=%.1f wallElapsed=%.1f debugLabels=%d combo=%d medals=%d map=%d daily=%d paused=%d heroX=%.3f heroXMin=%.3f heroXMax=%.3f worldTX=%d worldTY=%d worldTXMax=%d titleOk=%d roof=%d stallSec=%.1f titleHidden=%d",
             phase, boot, fpsAvg, fpsSamples, maxFrameMs, stomps, shinies,
             mask ? 1 : 0, maskOn ? 1 : 0, died ? 1 : 0, won ? 1 : 0, elapsed, wallElapsed, debugLabels,
             combo, medals, map ? 1 : 0, daily ? 1 : 0, paused ? 1 : 0,
-            heroX, heroXMin, heroXMax, worldTX, worldTY, worldTXMax, titleOk ? 1 : 0, roof ? 1 : 0, stallSec
+            heroX, heroXMin, heroXMax, worldTX, worldTY, worldTXMax, titleOk ? 1 : 0, roof ? 1 : 0, stallSec,
+            titleHidden ? 1 : 0
         )
     }
 
-    public static var fileURL: URL {
-        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+    public static var docsURL: URL {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSTemporaryDirectory())
-        return docs.appendingPathComponent("smoke_status.txt")
+    }
+
+    public static var fileURL: URL {
+        docsURL.appendingPathComponent("smoke_status.txt")
     }
 
     /// Append-only timer samples for CI monotonicity check.
     public static var timerLogURL: URL {
-        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
-            ?? URL(fileURLWithPath: NSTemporaryDirectory())
-        return docs.appendingPathComponent("smoke_timer_log.txt")
+        docsURL.appendingPathComponent("smoke_timer_log.txt")
     }
 
     public func write() {

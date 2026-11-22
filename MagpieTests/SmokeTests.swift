@@ -36,9 +36,9 @@ final class SmokeTests: XCTestCase {
                 if map.isSolid(t) { solids += 1 }
             }
         }
-        // Exploration rebuild (~940 solids) still well under a 1200 soft ceiling.
+        // Short Downtown heist — solid deck under a soft ceiling.
         XCTAssertLessThan(solids, 1200, "unexpected solid count \(solids)")
-        XCTAssertGreaterThan(solids, 100)
+        XCTAssertGreaterThan(solids, 40)
     }
 
     /// Regression: SmokeBrain can drive 45s of the smoke demo rooftop without trapping the sim.
