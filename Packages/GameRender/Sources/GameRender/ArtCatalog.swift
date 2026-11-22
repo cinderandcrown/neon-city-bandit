@@ -1264,17 +1264,17 @@ public final class BanditVisual: SKNode {
         if let victoryC {
             cycles["victory"] = victoryC
         }
-        // CI + playtest evidence: with west-flip the raccoon still faces left while
-        // running right (backpack/cyan tubes on the right). Treat shipping sheets as
-        // east-facing so body.xScale = +sign(vx) puts the muzzle forward.
-        usesWestSheets = false
+        // Shipping Spriterrific / library sheets face WEST (meta direction "w").
+        // body.xScale must flip when traveling east — usesWestSheets=false was the
+        // long-session moonwalk (muzzle left while vx > 0).
+        usesWestSheets = runC?.facesWest ?? idleC?.facesWest ?? true
 
         if !sheetDriven {
             let licensedRun = ArtCatalog.licensedCycleTextures("run", maxFrames: 12)
             runTextures = licensedRun.count >= 6 ? licensedRun : ArtCatalog.textures(AssetManifest.runCycle)
             idleTextures = ArtCatalog.licensedCycleTextures("idle", maxFrames: 8)
             jumpTextures = ArtCatalog.licensedCycleTextures("jump", maxFrames: 8)
-            usesWestSheets = false
+            usesWestSheets = true
         }
 
         idleTex = idleTextures.first ?? ArtCatalog.texture(.raccoonIdle)
@@ -1438,20 +1438,14 @@ public final class BanditVisual: SKNode {
 
     /// Sole facing writer — call once per frame after pose/squash so every movement
     /// source (run, dash, knockback, retreat, Mask) ends at the same xScale.
+    /// `facing` is the sim's authoritative travel facing (move-intent first, then vx).
     public func applyTravelFacing(velocityX: Double, facing: Double) {
-        if abs(velocityX) > 0.01 {
-            facingSign = velocityX >= 0 ? 1 : -1
-        } else {
-            facingSign = facing >= 0 ? 1 : -1
-        }
+        _ = velocityX
+        facingSign = facing >= 0 ? 1 : -1
         let face = bodyFaceScale()
         sprite.xScale = abs(sprite.xScale)
-        if body.action(forKey: "sq") != nil {
-            // Preserve squash magnitude; force travel sign so mid-stomp dashes can't moonwalk.
-            body.xScale = (face < 0 ? -1 : 1) * max(abs(body.xScale), 0.01)
-        } else {
-            body.xScale = face
-        }
+        // Always assert travel sign — never leave a stale scale from pose/squash/trails.
+        body.xScale = face
     }
 
     /// Testable: west sheets flip when velocity/facing points east (+1).

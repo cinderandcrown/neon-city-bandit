@@ -4119,7 +4119,10 @@ public final class HeistScene: SKScene {
             smokeLite: false
         )
         // Sole facing write — after pose/squash so dash, retreat, Mask, and stomps all agree.
+        // Prefer facing (move intent) when |vx| is fighting the stick during turnarounds.
         bandit.applyTravelFacing(velocityX: b.velocity.x, facing: b.facing)
+        bandit.isHidden = false
+        if bandit.alpha < 0.35 { bandit.alpha = 1 }
         // Foot puffs while sprinting — motion reads even if the sheet is subtle.
         runDustCooldown -= dt
         if b.onGround, abs(b.velocity.x) > tuning.feel.runSpeed * tuning.tileSize * 0.45, runDustCooldown <= 0 {

@@ -251,14 +251,19 @@ public struct SmokeBrain: Equatable, Sendable {
         return forwardRunInput(sim: sim, tx: tx, ty: ty, allowMask: captureMask)
     }
 
-    /// Near-exit soft hold only — never reverse (auto-runner faces right).
+    /// Near-exit: commit into the vault (win) or peel back mid-map — never crawl past.
     private func steerFromExit(_ input: InputFrame, sim: Sim, tx: Int) -> InputFrame {
         guard act != .finishPush else { return input }
         guard let exitX = sim.map.findFirst(.exit)?.0 else { return input }
-        if tx >= exitX - 8 {
-            var held = input
-            held.moveX = max(0.15, min(input.moveX, 0.35))
-            return held
+        if tx >= exitX - 1 {
+            var commit = input
+            commit.moveX = 1.0
+            return commit
+        }
+        if tx >= exitX - 14, act != .seekDeath {
+            var peel = input
+            peel.moveX = -1.0
+            return peel
         }
         return input
     }
@@ -363,18 +368,24 @@ public struct SmokeBrain: Equatable, Sendable {
             moveX = 1.0
         }
 
-        // Stay well clear of the vault until death — crossing EXIT ends the run for real.
-        // Retreat early so the green VAULT marker is never crossed before finishPush.
+        // Vault policy: never soft-pass a green VAULT. Stay mid-map until death; if the
+        // lip is reached anyway, commit right into EXIT so bankAndExit wins immediately.
         if midrunOk, !diedOnce, act != .seekDeath, act != .finishPush {
             let exitX = sim.map.findFirst(.exit)?.0 ?? (sim.map.width - 2)
-            if tx >= exitX - 5 {
+            if tx >= exitX - 1 {
+                // Marker is on screen / underfoot — finishing is mandatory (no retreat pass).
+                moveX = 1.0
+                jumpPressed = false
+                jumpHeld = false
+                pouncePressed = false
+                dashPressed = false
+            } else if tx >= exitX - 14 {
+                // Keep the vault off-camera during mop hunt / Mask / pause beats.
                 moveX = -1.0
                 jumpPressed = false
                 jumpHeld = false
                 pouncePressed = false
                 dashPressed = false
-            } else if tx >= exitX - 8 {
-                moveX = min(moveX, 0.25)
             }
         }
 

@@ -297,13 +297,13 @@ public struct Sim: Equatable, Sendable {
     private mutating func integrate(input: InputFrame, bandit: inout BanditState, dt: Double) {
         let feel = tuning.feel
         let move = max(-1, min(1, input.moveX))
-        // Facing follows velocity.x every frame so the sprite never moonwalks.
-        // Tiny epsilon — knockback recovery used to leave facing stuck left while
-        // drifting right with |vx| under the old 0.5 threshold.
-        if abs(bandit.velocity.x) > 0.01 {
-            bandit.facing = bandit.velocity.x >= 0 ? 1 : -1
-        } else if abs(move) > feel.stickDeadZone {
+        // Facing follows move intent when steering, else velocity.x.
+        // Intent-first kills turnaround moonwalk (retreat→dash right): vx can lag
+        // negative for several frames while the stick/brain already says go right.
+        if abs(move) > feel.stickDeadZone {
             bandit.facing = move >= 0 ? 1 : -1
+        } else if abs(bandit.velocity.x) > 0.01 {
+            bandit.facing = bandit.velocity.x >= 0 ? 1 : -1
         }
 
         // Accel from time-to-speed: reach runPx in groundAccelTime; stop in groundStopTime.
@@ -794,17 +794,15 @@ public struct Sim: Equatable, Sendable {
             bandit.carriedShinies = 0
             state.events.append(SimEvent(kind: .bank, position: bandit.position))
         }
-        // Vault clear: feet on/aligned with the EXIT column on the vault deck.
-        // Covers street approach and the lower deck under the door after a pit climb.
+        // Vault clear: overlapping the EXIT door on the vault deck (street or lower pit route).
+        // Door visual is ~1.2 tiles wide — win when feet enter that volume, not only the
+        // exact EXIT glyph, so a green VAULT pass always ends the run.
         guard bandit.onGround else { return }
-        let onExit: Bool = {
-            if t == .exit { return true }
-            guard let e = map.findFirst(.exit) else { return false }
-            // Same column as the vault marker, standing on the vault deck (not a distant floor).
-            let sameCol = tx == e.0
-            let onDeck = abs(bandit.position.y - Double(e.1) * tile) < tile * 1.35
-            return sameCol && onDeck
-        }()
+        guard let e = map.findFirst(.exit) else { return }
+        let exitCenterX = Double(e.0) * tile + tile * 0.5
+        let onDeck = abs(bandit.position.y - Double(e.1) * tile) < tile * 1.6
+        let overlapsDoor = abs(bandit.position.x - exitCenterX) <= tile * 0.75
+        let onExit = onDeck && (t == .exit || overlapsDoor || tx == e.0)
         guard onExit else { return }
         state.vaultReached = true
         let total = bandit.bankedShinies + bandit.carriedShinies

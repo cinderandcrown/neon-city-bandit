@@ -288,14 +288,15 @@ final class SmokeWorldProgressTests: XCTestCase {
 
     // MARK: - Long-session path (smoke midrun / retreat / dash — not just clean finishPush)
 
-    /// Long session: retreat then dash/run right — facing must track +vx (moonwalk at ~1:03 path).
+    /// Long session: retreat then dash/run right — facing follows move intent immediately
+    /// (not lagged vx), matching the ~1:03 moonwalk path.
     func testLongSessionFacingAfterRetreatAndDash() throws {
         let map = try NeonDocksLevel.load()
         var sim = Sim(map: map, tuning: .default, seed: 11)
         sim.startRun()
         let tile = sim.tuning.tileSize
         let exit = map.findFirst(.exit)!
-        // Park near vault lip where smoke retreats (long-session loop), then reverse+dash.
+        // Park near vault lip where smoke peels back (long-session loop), then reverse+dash.
         var stand = map.worldStandOnDeckBelow(ofX: exit.0 - 6, markerY: exit.1, tileSize: tile)
         stand.y += 14
         sim.state.bandit.position = stand
@@ -304,13 +305,48 @@ final class SmokeWorldProgressTests: XCTestCase {
             sim.step(InputFrame(moveX: -1))
         }
         XCTAssertEqual(sim.state.bandit.facing, -1)
-        // Dash right — movement source that used to bake facing into squash / miss the update.
+        // First frame of reverse: intent is right even if vx is still negative.
         sim.step(InputFrame(moveX: 1, dashPressed: true))
+        XCTAssertEqual(sim.state.bandit.facing, 1, "facing must flip on move intent the same frame as dash")
         for _ in 0..<20 {
             sim.step(InputFrame(moveX: 1))
         }
         XCTAssertGreaterThan(sim.state.bandit.velocity.x, 0.5, "must be moving right after dash")
         XCTAssertEqual(sim.state.bandit.facing, 1, "long-session dash/run right must face +1")
+    }
+
+    /// Long session: reaching the vault lip mid-smoke must commit into EXIT and win
+    /// (no peel-back pass that leaves the green VAULT on screen).
+    func testLongSessionVaultLipCommitsToWin() throws {
+        let map = try NeonDocksLevel.load()
+        var sim = Sim(map: map, tuning: .default, seed: 13)
+        var brain = SmokeBrain()
+        brain.sawMask = true
+        brain.diedOnce = false
+        brain.act = .play
+        SmokeBrain.clearSmokeFlags()
+        SmokeBrain.setSmokeFlag("smoke_proceed.txt", present: true)
+        SmokeBrain.setSmokeFlag("smoke_midrun_ok.txt", present: true)
+        defer { SmokeBrain.clearSmokeFlags() }
+        sim.startRun()
+        let tile = sim.tuning.tileSize
+        let exit = map.findFirst(.exit)!
+        var stand = map.worldStandOnDeckBelow(ofX: exit.0 - 1, markerY: exit.1, tileSize: tile)
+        stand.y += 14
+        sim.state.bandit.position = stand
+        sim.state.bandit.onGround = true
+        var won = false
+        for _ in 0..<120 {
+            let cue = brain.next(sim: sim)
+            XCTAssertGreaterThanOrEqual(cue.input.moveX, 0.5, "lip must commit right into vault, not retreat")
+            sim.step(cue.input)
+            if case .won = sim.state.phase {
+                won = true
+                break
+            }
+        }
+        XCTAssertTrue(won, "vault lip mid-smoke must end the run")
+        XCTAssertTrue(sim.state.vaultReached)
     }
 
     /// Long session: walking onto EXIT mid-smoke (before death) must win — no soft-bounce undo.
